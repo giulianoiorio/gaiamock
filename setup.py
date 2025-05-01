@@ -7,17 +7,14 @@ from pathlib import Path
 
 class CustomBuild(build_py):
     def run(self):
-        # Check if pkg-config is installed
-        try:
-            subprocess.check_output(['pkg-config', '--exists', 'gsl'])
-        except subprocess.CalledProcessError:
-            print("ERROR: GSL development libraries not found. Please install libgsl-dev (Linux) or gsl (Mac with Homebrew).", file=sys.stderr)
-            sys.exit(1)
+        # Check if gsl-config is installed
 
         # Get GSL flags
-        cflags = subprocess.check_output(['pkg-config', '--cflags', 'gsl']).decode().strip().split()
-        libs = subprocess.check_output(['pkg-config', '--libs', 'gsl']).decode().strip().split()
-
+        try:
+            cflags = subprocess.check_output(['gsl-config', '--cflags']).decode().strip().split()
+            libs = subprocess.check_output(['gsl-config', '--libs']).decode().strip().split()
+        except:
+            raise ValueError("Error on checking gsl-config. Is gsl installed?")
 
         # Destination for compiled shared library
         build_lib = Path(self.build_lib) / "gaiamock"
