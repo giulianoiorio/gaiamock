@@ -494,8 +494,9 @@ def get_realistic_epoch_astrometry_errors(ra, dec, phot_g_mean_mag):
     '''
     
     hpxs =  hp.ang2pix(16, np.radians(90.0 - np.array(dec)), np.radians(np.array(ra)), nest=False)
-   
-    tmp = np.load(os.path.join(os.path.dirname(__file__), 'healpix_16_med_ruwe.npz'))
+    #To be consistent with the package structre
+    tmp = np.load(f"{os.path.dirname(__file__)}/data/healpix_16_med_ruwe.npz")
+    #tmp = np.load(os.path.join(os.path.dirname(__file__), 'healpix_16_med_ruwe.npz'))
     med_ruwe = tmp['med_ruwe']
     tmp.close()
     

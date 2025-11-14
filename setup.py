@@ -39,7 +39,10 @@ setup(
     packages=find_packages(),
     cmdclass={"build_py": CustomBuild},
     include_package_data=True,
-    package_data={"gaiamock": ["kepler_solve_astrometry.so"]},
+    package_data={"gaiamock": [
+                    "kepler_solve_astrometry.so",
+                    "data/**/*"
+                    ]},
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: C",
