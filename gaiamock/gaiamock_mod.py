@@ -279,8 +279,8 @@ def get_5par_solution_and_sigma_5d_max(t_ast_yr, psi, plx_factor, ast_obs, ast_e
     
     return ruwe, mu, sigma_mu, sigma5d_max
 
-
-def check_7par(t_ast_yr, psi, plx_factor, ast_obs, ast_err):
+#@TODO added binned=True (even if not used)  to be consistent with gaiamock
+def check_7par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True):
     '''
     This function takes a set of astrometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err) and fits a 7-parameter acceleration solution. It inflates the uncertainties according to the goodness of fit and returns the best-fit parameters and uncertainties and F2 and significance associated with the solution. 
     '''
