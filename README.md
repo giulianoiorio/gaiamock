@@ -1,3 +1,11 @@
+# This fork 
+
+In this fork version we pull the recent changes from the upstream repository  + 
+we added the new module gaiamock_mod. It contains all the function of gaiamock with 
+the same name but handle the ruwe estimate for single stars in a more detailed way, 
+see the main documentation below. Notice that to use it, we need additional files (see below).
+
+
 # gaiamock
 
 This is a package for simulating Gaia astrometry at the epoch level. To install it, do the following: 
