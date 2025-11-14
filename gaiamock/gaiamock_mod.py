@@ -7,6 +7,19 @@ import healpy as hp
 import joblib
 
 # this version of the code is meant to work on unbinned data
+HEALPYX_TABLE_PATH=os.path.join(os.path.dirname(__file__), 'healpix_scans')
+
+def set_healpyx_table_path(path):
+    '''
+    Set the path to the healpyx table directory. This is used to read in the Gaia scan data.
+    '''
+    global HEALPYX_TABLE_PATH
+    HEALPYX_TABLE_PATH = path  
+    # Check if path exists      
+    if not os.path.exists(HEALPYX_TABLE_PATH):
+        raise ValueError(f"Path {HEALPYX_TABLE_PATH} does not exist. Please set a valid path to the healpyx table directory.")
+
+
 
 def al_uncertainty_per_ccd_interp(G):
     '''
@@ -543,7 +556,9 @@ def get_gost_one_position(ra, dec, data_release):
     This version is for data that has *not* been binned over ccd transits
     '''
     num =  hp.ang2pix(16, np.radians(90.0 - np.array(dec)), np.radians(np.array(ra)), nest=False)
-    tab = Table.read(os.path.join(os.path.dirname(__file__), 'healpix_scans/healpix_16_%d.fits' % num))
+    #tab = Table.read(os.path.join(os.path.dirname(__file__), 'healpix_scans/healpix_16_%d.fits' % num))
+    #tab = Table.read(os.path.join(os.path.dirname(__file__), 'healpix_scans/healpix_64_%d.fits' % num))
+    tab= Table.read(f"{HEALPYX_TABLE_PATH}/healpix_16_{num}.fits")
     jd = fetch_table_element('ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]', tab)
     
     if data_release == 'dr4':

@@ -2,3 +2,5 @@
 build/
 dist/
 gaiamock.egg-info/
+.idea/
+.idea*
