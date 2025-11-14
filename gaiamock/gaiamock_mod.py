@@ -226,7 +226,8 @@ def solve_kepler_eqn_on_array(M, ecc, c_funcs, xtol = 1e-10):
 
     return results_array
 
-def check_ruwe(t_ast_yr, psi, plx_factor, ast_obs, ast_err):
+#@TODO added binned=True (even if not used) to be consistent with gaiamock
+def check_ruwe(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True):
     '''
     This function takes a set of astrometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err) and fits a 5-parameter solution. It inflates the uncertainties according to the goodness of fit and returns the 5-parameter UWE, best-fit parameters, and uncertainties. 
     '''
