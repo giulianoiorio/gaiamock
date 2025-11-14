@@ -382,7 +382,9 @@ def rescale_times_astrometry(jd, data_release):
     t_ast_yr = t_ast_day/365.25
     return t_ast_yr
     
-def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc, w, phot_g_mean_mag, f, data_release, c_funcs, reject_10_percent = True):
+#@TODO I added the variable do_blending noise, because it was used in the signature call of the same funciton in gaiamock
+#ask to Kareem why it is not present here
+def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc, w, phot_g_mean_mag, f, data_release, c_funcs, do_blending_noise = False, reject_10_percent = True):
     '''
     this function predicts the epoch-level astrometry for a binary as it would be observed by Gaia. 
     ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
@@ -1164,7 +1166,9 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     
     return Lambda_pred, rv_pred
     
-def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean_mag, data_release):
+#@TODO GI: I added the unused variable c_func because it is present in gaiamock, but also in this case it is not used
+#it should be removed in both cases, but to do not break my other script I added it
+def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean_mag, data_release, c_funcs):
     '''
     this function predicts the epoch-level astrometry for single source. 
     ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
