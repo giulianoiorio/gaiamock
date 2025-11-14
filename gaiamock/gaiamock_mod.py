@@ -305,7 +305,8 @@ def check_7par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True):
     s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
     return F2, s, mu, sigma_mu
  
-def check_9par(t_ast_yr, psi, plx_factor, ast_obs, ast_err):
+#@TODO added binned=True (even if not used)  to be consistent with gaiamock
+def check_9par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned=True):
     '''
     This function takes a set of astrometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err) and fits a 9-parameter acceleration solution. It inflates the uncertainties according to the goodness of fit and returns the best-fit parameters and uncertainties and F2 and significance associated with the solution. 
     '''
