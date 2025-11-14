@@ -691,7 +691,8 @@ def plot_residuals_7par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, theta_array
     ax[1].set_ylabel('residual (7 par)', fontsize=20)
 
     
-def get_uncertainties_at_best_fit_binary_solution(t_ast_yr, psi, plx_factor, ast_obs, ast_err, p0, c_funcs, reject_outlier=False):
+#@TODO added binned=True (even if not used)  to be consistent with gaiamock
+def get_uncertainties_at_best_fit_binary_solution(t_ast_yr, psi, plx_factor, ast_obs, ast_err, p0, c_funcs, binned=True, reject_outlier=False):
     '''
     This function calculates the Hessian matrix, approximated from the Jacobian, at a coordinate in 12-dimensional parameter space p0. 
     p0 = (ra_offset, dec_offset, parallax, pmra, pmdec, period, ecc, phi_p, A, B, F, G)
