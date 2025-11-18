@@ -56,3 +56,51 @@ Now you can
 import gaiamock_mod as gaiamock
 ```
 and use the same functions you would use in gaiamock, e.g. for predicting epoch astrometry and computing RUWE. 
+
+# A modified version to include the chromaticity effect due to star Variability
+
+IN Gaia, the measured along-scan (AL) centroid of a star depends not only on its true astrometric motion but also on its spectral
+energy distribution (SED).
+Because Gaia PSF/LSF and optical response are wavelength-dependent, stars with different colours (BP-RP) produce slightly different
+AL image centroids. 
+This systematic shift is known as chromaticity. 
+
+For non-variable stars, Gaia's calibraion pipeline remove the average chroamtic offest using colour information BP/RP or directly 
+the specta. 
+However, for stars with time-varying colours (e.g., RR Lyrae or Cepheids), the chromaticity will not change randomly but radially periodically, and the a-posteriori correction will not remove this effect (but just centre the periodic shift around the mean). 
+This will likely increase the residual of the astrometic fit inflating the RUWE. 
+Indeed, in Gaia for RR Lyrae there is the tendency to have inflated RUWE at high amplitudes ([Belokurov et al., 2020](https://ui.adsabs.harvard.edu/abs/2020MNRAS.496.1922B/abstract))
+
+As discussed in the Gaia thecnical document [Chromaticity in Gaia](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://dms.cosmos.esa.int/COSMOS/doc_fetch.php%3Fid%3D2694426&ved=2ahUKEwjslpWj9fqQAxXlVaQEHUg4AdUQFnoECB0QAQ&usg=AOvVaw19wUyqqsQqgIK0X1OY4fHR) the chromaticity effect depends mostly on the effective wavenumber $\nu_{eff}$ reported in Gaia in the columns pseudocolor. 
+With the pseudocolor, the shight along the AL can be modeled as $\Delta \eta = C_1 (\nu_{eff}-\nu_{eff,0}) + C_2 (\nu_{eff}-\nu_{eff,0})^2 + ....$ with $\nu_{eff,0}$ that is a reference frequency.
+
+The pseudocolor depends on the colour and can be approximated by 
+$$
+\nu_{eff} \approx 1.76 - \frac{1.61}{\pi} \mathrm{atan} \left( 0.531 (G_{BP} - G_{RP}) \right) \mu m^{-1}
+$$
+as in Eq. 3 of [Lindegren+21](https://ui.adsabs.harvard.edu/abs/2021A%26A...649A...2L/abstract).
+
+Anyway, for a simple first order prescription of the chromaticity effect, we can assume that the offset is a linear function of the color shift:
+
+$$
+\eta = k_G ((BP-RP)- (BP-RP)_0) = k_G ((BP-RP)_0 + \delta_C) = k_G(BP-RP)_0 + k_G\delta_C
+$$
+where $(BP-RP)_0$ is the reference mean color and the first term can be excluded by the model because it is the term it is corrected for in the calibarion, so
+$$
+\Delta \eta = k_G \delta_c
+$$, 
+and since for variable stars the color change is time dependent, we have
+$$
+\Delta \eta (t) = k_G \delta_c(t,t_0)
+$$
+where $t_0$ is the reference epogh for the light curve. 
+
+The value of the coefficient $k_G$ this is essentially a free paramter, however we can set it on the same order of the typical  random uncertantines on the calibrated $\eta$. This depends on G and can be find in Fig. 1 of [El-Badry+24](https://ui.adsabs.harvard.edu/abs/2024OJAp....7E.100E/abstract) (Fig. 1), based on the analysis in [Holl+23](https://ui.adsabs.harvard.edu/abs/2023A%26A...674A..10H/abstract) (their Fig. 3), that is relatated to the astrometric paper by [Lindegren+21](https://www.aanda.org/articles/aa/pdf/2021/05/aa39709-20.pdf). 
+
+So the final model could be 
+
+$$
+\Delta \eta (t) = f_\sigma \sigma_\eta(G) \delta_c(t,t_0)
+$$
+
+Varying f, we can explore the effect in term of signal over the noise, typical color amplitude for RR Lyrae are  < 1 mag. >
