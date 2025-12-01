@@ -5,6 +5,7 @@ import ctypes
 from astropy.table import Table
 import healpy as hp
 import joblib
+from . import variability_tool as vt
 
 HEALPYX_TABLE_PATH=os.path.join(os.path.dirname(__file__), 'healpix_scans')
 
@@ -27,6 +28,24 @@ def al_uncertainty_per_ccd_interp(G):
     sigma_eta = [0.4, 0.35, 0.15, 0.17, 0.23, 0.13,0.13, 0.135, 0.125, 0.13, 0.15, 0.23, 0.36, 0.63, 1.05, 2.05, 4.1]
     return np.interp(G, G_vals, sigma_eta)
 
+
+def al_chromatic_shift(Gmean,delta_bp_rp,fchrom=0.2):
+    '''
+    Estimate the chromatic shift uncertainty in the AL direction, with a simple toy moodel. 
+    We assume a linear realtion with the color of the kind K_g(G) * ((BP-RP) - (BP-RP)_0) = K_g(G) *((BP-RP)_0 + delta_bp_rp)
+    where  (BP-RP)_0 is an average color, since Gaia calibration already remove the chromatic shift accounting for the average color, 
+    here we are just interest in the variation. 
+    We assume K_g(G) = fchrom * sigma_eta(G), where sigma_eta(G) is the AL uncertainty per CCD as a function of G mag,
+    and fchrom is a scaling factor. 
+    Gmean: mean G mag of the source
+    delta_bp_rp: variation in BP-RP color around the average color (BP-RP)_0
+    fchrom: scaling factor to convert AL uncertainty to chromatic shift uncertainty
+    returns: estimated chromatic shift uncertainty in AL direction (mas)
+    '''
+
+    sigma_eta = al_uncertainty_per_ccd_interp(Gmean)
+
+    return fchrom*sigma_eta*delta_bp_rp
 
 def read_in_C_functions():
     '''
@@ -1232,7 +1251,7 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     
     return Lambda_pred, rv_pred
     
-def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean_mag, data_release, c_funcs):
+def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean_mag, data_release, c_funcs=None, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function predicts the epoch-level astrometry for single source. 
     ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
@@ -1260,6 +1279,12 @@ def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean
         extra_noise = 0
     
     Lambda_pred = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor 
+
+    #Add chromaticity effect due to color variability
+    colors = variability_tool(jds)
+    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, fchrom=variability_tool.fchrom)
+    Lambda_pred += Lambda_chromatic
+
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
     Lambda_pred += extra_noise*np.random.randn(len(psi)) # unmodeled noise
 

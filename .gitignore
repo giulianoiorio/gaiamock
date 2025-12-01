@@ -4,3 +4,8 @@ dist/
 gaiamock.egg-info/
 .idea/
 .idea*
+
+# pixi environments
+.pixi
+*.egg-info
+pixi.lock
