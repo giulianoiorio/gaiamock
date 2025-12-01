@@ -447,7 +447,7 @@ def rescale_times_astrometry(jd, data_release):
     t_ast_yr = t_ast_day/365.25
     return t_ast_yr
     
-def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc, w, phot_g_mean_mag, f, data_release, c_funcs, do_blending_noise = False, reject_10_percent = True):
+def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc, w, phot_g_mean_mag, f, data_release, c_funcs, do_blending_noise = False, reject_10_percent = True, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function predicts the epoch-level astrometry for a binary as it would be observed by Gaia. 
     ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
@@ -499,6 +499,14 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f) for i in range(len(psi))])
     Lambda_com = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor # barycenter motion
     Lambda_pred = Lambda_com + bias # binary motion
+
+    #Chromatic shift
+    #Add chromaticity effect due to color variability
+    colors = variability_tool(jds)
+    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+                                          fchrom=variability_tool.fchrom, 
+                                          relative_norm=variability_tool.relative_norm)
+    Lambda_pred += Lambda_chromatic
 
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
     Lambda_pred += extra_noise*np.random.randn(len(psi)) # unmodeled noise
