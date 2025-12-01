@@ -1289,7 +1289,9 @@ def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean
 
     #Add chromaticity effect due to color variability
     colors = variability_tool(jds)
-    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, fchrom=variability_tool.fchrom)
+    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+                                          fchrom=variability_tool.fchrom, 
+                                          relative_norm=variability_tool.relative_norm)
     Lambda_pred += Lambda_chromatic
 
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
