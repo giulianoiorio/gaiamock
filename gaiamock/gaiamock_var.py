@@ -1072,7 +1072,13 @@ def run_full_astrometric_cascade(ra, dec,
 
     return res
     
-def run_only_5par_solution(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc_deg, w, phot_g_mean_mag, f, data_release, c_funcs):
+def run_only_5par_solution(ra, dec, 
+                           parallax, pmra, pmdec, 
+                           m1, m2, period, 
+                           Tp, ecc, omega, inc_deg, w, 
+                           phot_g_mean_mag, f, 
+                           data_release, c_funcs,
+                           variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function generates the mock 1D astrometry for a binary and then fits it with a 5-parameter solution.
     ra, dec: coordinates, in degrees
@@ -1090,11 +1096,20 @@ def run_only_5par_solution(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, e
     f: flux ratio, F2/F1, in the G-band. 
     data_release: 'dr3', 'dr4', or 'dr5'
     c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     '''
     if c_funcs is None:
         c_funcs = read_in_C_functions()
 
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, m1 = m1, m2 = m2, period = period, Tp = Tp, ecc = ecc, omega = omega, inc = inc_deg*np.pi/180, w=w, phot_g_mean_mag = phot_g_mean_mag, f=f, data_release=data_release, c_funcs=c_funcs)
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
+                                                                                     parallax = parallax, pmra = pmra, pmdec = pmdec, 
+                                                                                     m1 = m1, m2 = m2, period = period, 
+                                                                                     Tp = Tp, ecc = ecc, omega = omega, 
+                                                                                     inc = inc_deg*np.pi/180, w=w, 
+                                                                                     phot_g_mean_mag = phot_g_mean_mag, 
+                                                                                     f=f, data_release=data_release, 
+                                                                                     c_funcs=c_funcs,
+                                                                                     variability_tool=variability_tool)
 
     res = fit_5par_solution_only(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, binned = True)
     return res
@@ -1253,7 +1268,12 @@ def predict_radial_velocities(t_rvs_day, period, Tp, ecc, w, K, gamma, c_funcs):
     return results_array
     
     
-def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_yr, period, Tp, ecc, m1, m2, f, parallax, pmra, pmdec, omega, w, inc_deg, gamma, c_funcs):
+def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_yr, 
+                                              period, Tp, ecc, 
+                                              m1, m2, f, parallax, pmra, pmdec, 
+                                              omega, w, inc_deg, gamma, 
+                                              c_funcs,
+                                              variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     This function predicts both astrometry and RV curves for the same binary. They can be sampled at different times. 
     t_ast_year: times at which the RVs are sampled, in years, relative to the reference epoch
@@ -1273,6 +1293,7 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     inc_deg: inclination, in degrees
     gamma: center-of-mass RV, km/s
     c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     '''
     EE = solve_kepler_eqn_on_array(M = 2*np.pi/period * (t_ast_yr*365.25 - Tp), ecc = ecc, c_funcs = c_funcs)
     a_mas = get_a_mas(period, m1, m2, parallax)
@@ -1291,6 +1312,13 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f) for i in range(len(psi))])
     Lambda_pred = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor + bias
     
+    #Chromatic shift
+    #Add chromaticity effect due to color variability
+    colors = variability_tool(jds)
+    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+                                          fchrom=variability_tool.fchrom, 
+                                          relative_norm=variability_tool.relative_norm)
+    Lambda_pred += Lambda_chromatic
     
     G, Msun = 6.6743e-11, 1.9884098e+30 # SI units
     K1_kms = 0.001*(2*np.pi*G*(m2*Msun) * (m2/(m1 + m2))**2 / (period*86400 *  (1 - ecc**2)**(3/2)))**(1/3) * np.sin(inc_deg*np.pi/180)
@@ -1298,7 +1326,11 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     
     return Lambda_pred, rv_pred
     
-def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean_mag, data_release, c_funcs=None, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
+def predict_astrometry_single_source(ra, dec, 
+                                     parallax, pmra, pmdec, 
+                                     phot_g_mean_mag, 
+                                     data_release, c_funcs=None, 
+                                     variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function predicts the epoch-level astrometry for single source. 
     ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
