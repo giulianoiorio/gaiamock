@@ -523,7 +523,7 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit*np.ones(len(Lambda_pred))
 
 
-def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, period, Tp, ecc, omega, inc, w, a0_mas, phot_g_mean_mag, data_release, c_funcs):
+def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, period, Tp, ecc, omega, inc, w, a0_mas, phot_g_mean_mag, data_release, c_funcs, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function predicts the epoch-level astrometry for a binary as it would be observed by Gaia, in terms of a0 rather than m1 and m2 and f. It is only valid in the limit where the separation of the two stars is less than about 45 mas, so that the photocenter approximation works well. 
     
@@ -540,6 +540,7 @@ def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, per
     phot_g_mean_mag: G-band magnitude 
     data_release: 'dr3', 'dr4', or 'dr5'
     c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     '''
     
     t = get_gost_one_position(ra, dec, data_release=data_release)
@@ -572,6 +573,14 @@ def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, per
     
     Lambda_com = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor # barycenter motion
     Lambda_pred = Lambda_com + delta_eta # binary motion
+
+    #Chromatic shift
+    #Add chromaticity effect due to color variability
+    colors = variability_tool(jds)
+    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+                                          fchrom=variability_tool.fchrom, 
+                                          relative_norm=variability_tool.relative_norm)
+    Lambda_pred += Lambda_chromatic
 
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
     Lambda_pred += extra_noise*np.random.randn(len(psi)) # unmodeled noise
