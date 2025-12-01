@@ -39,10 +39,12 @@ def al_chromatic_shift(Gmean,delta_bp_rp,fchrom=0.2,relative_norm=True):
         - if relative_norm is True: K_g(G) = fchrom * sigma_eta(G), where sigma_eta(G) is the AL uncertainty per CCD as a function of G mag,
         - if relative_norm is False: K_g(G) = fchrom, so it is independent of G mag.
     If relative_norm is True, the bias due to the chromatict shift is the same at all G mag, because it scales with the G-dependent AL uncertainty.
-    If relative_norm is False, the bias due to the chromatict shift is larger at bright G mag, because the AL uncertainty is smaller there.
+    If relative_norm is False, the bias due to the chromatict shift is larger where the G-uncertainty are smaller (G-mag ), because the AL uncertainty is smaller there.
     Gmean: mean G mag of the source
     delta_bp_rp: variation in BP-RP color around the average color (BP-RP)_0
-    fchrom: scaling factor to convert AL uncertainty to chromatic shift uncertainty (mas units)
+    fchrom: scaling factor to convert AL uncertainty to chromatic shift uncertainty.
+            if relative_norm is True, fchrom is in units of the AL uncertainty per CCD;
+            if relative_norm is False, fchrom is in mas.
     relative_norm: if True, noralisaiton is relative to the AL uncertainty per CCD at given G mag; if False, absolute normalisation.
     returns: estimated chromatic shift uncertainty in AL direction (mas)
     '''
