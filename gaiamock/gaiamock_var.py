@@ -465,6 +465,9 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     f: flux ratio, F2/F1, in the G-band. 
     data_release: 'dr3', 'dr4', or 'dr5'
     c_funcs: from read_in_C_functions()
+    do_blending_noise: if True, adds extra noise for partially resolved sources
+    reject_10_percent: if True, randomly rejects 10% of the epochs to simulate
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     '''
     
     t = get_gost_one_position(ra, dec, data_release=data_release)
@@ -1275,6 +1278,7 @@ def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean
     phot_g_mean_mag: G-band magnitude
     f: flux ratio, F2/F1, in the G-band. 
     c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     '''
     
     t = get_gost_one_position(ra, dec, data_release=data_release)
