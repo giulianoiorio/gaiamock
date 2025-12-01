@@ -1005,7 +1005,17 @@ def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_
     return return_array
 
 
-def run_full_astrometric_cascade(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc_deg, w, phot_g_mean_mag, f, data_release, c_funcs, verbose=False, show_residuals=False, ruwe_min = 1.4, skip_acceleration=False):
+def run_full_astrometric_cascade(ra, dec, 
+                                 parallax, pmra, pmdec, 
+                                 m1, m2, 
+                                 period, Tp, ecc, 
+                                 omega, inc_deg, w, 
+                                 phot_g_mean_mag, f, 
+                                 data_release, c_funcs, 
+                                 verbose=False, 
+                                 show_residuals=False, 
+                                 ruwe_min = 1.4, skip_acceleration=False,
+                                 variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function generates the mock 1D astrometry for a binary and then fits it with a cascade of astrometric models.  
     ra, dec: coordinates, in degrees
@@ -1024,12 +1034,20 @@ def run_full_astrometric_cascade(ra, dec, parallax, pmra, pmdec, m1, m2, period,
     data_release: 'dr3', 'dr4', or 'dr5'
     c_funcs: from read_in_C_functions()
     verbose: whether to print results of fitting. 
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     if show_residuals, plot the residuals of the best-fit 5-parameter solution and the best-fit orbital solution. This will only happen if an orbital solution is actually calculated (i.e., we get to that stage in the cascade.)
     '''
     if c_funcs is None:
         c_funcs = read_in_C_functions()
 
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, m1 = m1, m2 = m2, period = period, Tp = Tp, ecc = ecc, omega = omega, inc = inc_deg*np.pi/180, w=w, phot_g_mean_mag = phot_g_mean_mag, f=f, data_release=data_release, c_funcs=c_funcs)
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
+                                                                                     parallax = parallax, pmra = pmra, pmdec = pmdec, 
+                                                                                     m1 = m1, m2 = m2, 
+                                                                                     period = period, Tp = Tp, ecc = ecc, 
+                                                                                     omega = omega, inc = inc_deg*np.pi/180, w=w, 
+                                                                                     phot_g_mean_mag = phot_g_mean_mag, f=f, 
+                                                                                     data_release=data_release, c_funcs=c_funcs,
+                                                                                     variability_tool=variability_tool)
     
     Nret = 23 # number of arguments to return 
     N_visibility_periods = int(np.sum( np.diff(t_ast_yr*365.25) > 4) + 1)
