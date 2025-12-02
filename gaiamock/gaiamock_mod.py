@@ -5,6 +5,8 @@ import ctypes
 from astropy.table import Table
 import healpy as hp
 import joblib
+from . import variability_tool as vt
+from . import gaiamock_var as gv
 
 # this version of the code is meant to work on unbinned data
 HEALPYX_TABLE_PATH=os.path.join(os.path.dirname(__file__), 'healpix_scans')
@@ -1171,7 +1173,11 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     
 #@TODO GI: I added the unused variable c_func because it is present in gaiamock, but also in this case it is not used
 #it should be removed in both cases, but to do not break my other script I added it
-def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean_mag, data_release, c_funcs):
+def predict_astrometry_single_source(ra, dec, 
+                                     parallax, pmra, pmdec, 
+                                     phot_g_mean_mag, 
+                                     data_release, c_funcs,
+                                     variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function predicts the epoch-level astrometry for single source. 
     ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
@@ -1180,6 +1186,7 @@ def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean
     phot_g_mean_mag: G-band magnitude
     f: flux ratio, F2/F1, in the G-band. 
     c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     '''
     
     t = get_gost_one_position(ra, dec, data_release=data_release)
@@ -1194,6 +1201,15 @@ def predict_astrometry_single_source(ra, dec, parallax, pmra, pmdec, phot_g_mean
     epoch_err_per_transit_expect = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)
 
     Lambda_pred = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor 
+
+    #Add chromaticity effect due to color variability
+    colors = variability_tool(jds)
+    Lambda_chromatic = gv.al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+                                          fchrom=variability_tool.fchrom, 
+                                          relative_norm=variability_tool.relative_norm)
+    Lambda_pred += Lambda_chromatic
+
+    #Add errors
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
 
     return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit_expect*np.ones(len(Lambda_pred))
