@@ -97,10 +97,261 @@ where $t_0$ is the reference epogh for the light curve.
 
 The value of the coefficient $k_G$ this is essentially a free paramter, however we can set it on the same order of the typical  random uncertantines on the calibrated $\eta$. This depends on G and can be find in Fig. 1 of [El-Badry+24](https://ui.adsabs.harvard.edu/abs/2024OJAp....7E.100E/abstract) (Fig. 1), based on the analysis in [Holl+23](https://ui.adsabs.harvard.edu/abs/2023A%26A...674A..10H/abstract) (their Fig. 3), that is relatated to the astrometric paper by [Lindegren+21](https://www.aanda.org/articles/aa/pdf/2021/05/aa39709-20.pdf). 
 
-So the final model could be 
+So the final model is
 
 $$
 \Delta \eta (t) = f_\sigma \sigma_\eta(G) \delta_c(t,t_0)
 $$
 
-Varying f, we can explore the effect in term of signal over the noise, typical color amplitude for RR Lyrae are  < 1 mag. >
+Varying f, we can explore the effect in term of signal over the noise, typical color amplitude for RR Lyrae are  0.1-0.5
+
+As an alternative, we can assume a constant  normalisation constant that does not depend on G, so
+
+$$
+\Delta \eta (t) = f_\sigma \delta_c(t,t_0)
+$$
+
+In thi case the effect of the chromatic shfit will be larger for bright source with small astrometric  uncertanties and becomes negligible for faint source.
+
+## Implementation
+
+We added the module **gaiamock_var**, which includes the same functions as the standard `gaiamock` module,  
+but with variations in the following functions:
+
+- `predict_astrometry_single_source`
+- `predict_astrometry_luminous_binary`
+- `predict_astrometry_binary_in_terms_of_a0`
+- `run_only_5par_solution`
+- `run_full_astrometric_cascade`
+
+These functions now include an additional parameter, `variability_tool`, which must be an instance of the class  
+`VariabilityTool` defined in the module `variability_tool.py`.  
+By default, this parameter is set to the dummy instance `VariabilityTool(0.)`, which introduces **no variability-induced bias**.  
+Therefore, running these functions without specifying a `variability_tool` instance yields **exactly the same results** as the standard `gaiamock` functions, ensuring full **backwards compatibility**.
+
+In addition to the functions in `gaiamock_var`, the function  
+`predict_astrometry_single_source` in the module `gaiamock_mod` also accepts this extra parameter.
+
+To study the bias introduced by intrinsic variability, one must define a specialised class that inherits from  
+`VariabilityTool`, or use one of the classes already implemented in `variability_tool.py`.  
+Currently available classes include:
+
+- `SimpleSinusoidal` — models variability following a simple sinusoidal pattern  
+- `RRVariable` — reproduces RR Lyrae colour variations using the Gaia SOS harmonic decomposition
+
+The section below describes how to use the available classes and how to implement new ones.
+
+### The VariabilityTool class 
+
+#### VariabilityTool: framework for modelling variability-induced chromatic shifts
+
+The `VariabilityTool` framework provides a unified and extensible
+interface to model **intrinsic photometric variability** and its impact
+on **chromaticity-driven astrometric bias** in Gaia-like simulations.\
+It is designed to be integrated into the `gaiamock_var` module and any
+astrometric prediction routine that accepts a `variability_tool`
+parameter.
+
+All variability models implemented within this framework must:
+
+-   Inherit from the base class `VariabilityTool`
+-   Define the attributes
+    -   `fchrom`: scaling factor converting AL uncertainty into chromatic shift.
+    -   `relative_norm`: boolean flag controlling the normalisation scheme
+-   Implement the `__call__(time)` method returning a colour- or
+    flux-variability signal evaluated at BJD(TCB) times
+
+The goal is to provide a standardised way to inject colour variability
+and study its effect on Gaia astrometric solutions---while ensuring
+backward compatibility when no variability is applied.
+
+------------------------------------------------------------------------
+
+#### \### Core concept and behaviour
+
+The base class:
+
+``` python
+class VariabilityTool:
+    def __init__(self, fchrom, relative_norm=True)
+    def __call__(self, time)
+```
+
+implements the following logic:
+
+-   **`fchrom`**\
+    A multiplicative factor converting a color variation of the source
+    to the chromatic shfit.
+     Depending on the `relative_norm` value (see below) it could be a constant of units of mas/mag (`relative_norm=true`) or be interepreted as a strengh of the chromaticity sfhit in terms of astrometric noise at given G (`relative_norm=false`).
+
+-   **`relative_norm=True`**\
+    If enabled, the chromatic bias is normalised *relative to the AL
+    uncertainty* at the star's G magnitude.\
+    This ensures a *magnitude-independent* bias amplitude: fainter and
+    brighter stars receive variability-driven offsets scaled to their
+    intrinsic Gaia AL uncertainties.
+
+-   **`relative_norm=False`**\
+    The chromatic bias is expressed in absolute units (mas).\
+    The induced astrometric shift becomes larger for bright stars (with
+    smaller AL uncertainties) and smaller for faint stars. This value corresponds to the expected shift for a colour variability (with respect to the mean) of 1 mag
+
+-   **`__call__(time)`**\
+    This is the function that will be called in Gaiamock to get the colour at at given time of 
+    Gaia observations, then it will be internally transformed to a shift based on the parameter 
+    `fchrom` and `relative_norm`
+    The base implementation returns zero variability, making
+    `VariabilityTool` a no-op. Using the default instance
+    `VariabilityTool(0.)` ensures perfect backward compatibility with
+    the standard `gaiamock` behaviour.
+    **Note**, when called within Gaiamock the time will be in BJD in TCB. 
+
+
+Typical usage:
+
+``` python
+from variability_tool import VariabilityTool
+vt = VariabilityTool(fchrom=0.0)
+signal = vt(time_array)   # Always zero
+```
+
+------------------------------------------------------------------------
+
+### Implemented Variability Models
+
+#### 1. SimpleSinusoidal
+
+``` python
+class SimpleSinusoidal(VariabilityTool)
+```
+
+A minimal model producing a **pure sinusoidal** colour or
+flux variation.
+
+**Parameters:**
+
+-   `amp`: amplitude of the sinusoid
+-   `period`: period in days
+-   `fchrom`: chromatic-scaling factor
+-   `relative_norm`: whether the normalisation is relative or absolute
+
+
+**Example:**
+
+``` python
+from variability_tool import SimpleSinusoidal
+vt = SimpleSinusoidal(amp=0.05, period=0.6, fchrom=1.0)
+bias = vt(time_bjd_tcb)
+```
+------------------------------------------------------------------------
+
+#### 2. RRLVariable: RR Lyrae variability from Gaia SOS harmonic models
+
+``` python
+class RRLVariable(VariabilityTool)
+```
+
+A specialised model that reconstructs the **BP**, **RP**, and **G**
+light curves of an RR Lyrae star using the **Gaia SOS harmonic
+decomposition**.\
+From this, it computes the **BP--RP colour variability** as:
+
+$$
+v(t) = (BP(t) - RP(t)) - \langle  BP(t) - RP(t) \rangle
+$$
+
+
+**How it works:**
+
+-   Uses SOS parameters to build a Fourier-series template for BP, RP, and G.
+-   Computes the instantaneous colour variation at any BJD(TCB) time.
+-   Removes the mean colour so that `<v(t)> = 0`, as required for
+    chromatic modelling.
+
+**Expected `gaiadf` content (per SOS RRL entry):**
+
+-   `zp_mag_<band>`
+-   `fund_freq1`
+-   `fund_freq1_harmonic_ampl_<band>`
+-   `fund_freq1_harmonic_phase_<band>`
+-   `num_harmonics_for_p1_<band>`
+-   `reference_time_<band>`
+-   `phot_<band>_mean_mag`
+
+**Additional methods:**
+
+-   `g_lcurve(time)` → G-band magnitude at time `t`
+-   `bp_lcurve(time)` → BP-band magnitude at time `t`
+-   `rp_lcurve(time)` → RP-band magnitude at time `t`
+
+**Example usage:**
+
+``` python
+from variability_tool import RRLVariable
+vt = RRLVariable(gaiadf=sos_row, fchrom=1.0, relative_norm=False)
+color_variation = vt(time_bjd_tcb)
+```
+
+This class is ideal forsimulations of RR Lyrae astrometric biases in Gaia-like pipelines.
+
+------------------------------------------------------------------------
+
+### How to Implement a New Variability Model
+
+To define a new variability model, create a subclass of
+`VariabilityTool`, call the `super().__init__(fchrom=fchrom, relative_norm=relative_norm)`
+in the init to initiliase correctly fchrom and relative norm
+and override the `__call__` method.
+
+A minimal template:
+
+``` python
+from variability_tool import VariabilityTool
+import numpy as np
+
+class MyCustomVariability(VariabilityTool):
+    def __init__(self, fchrom, relative_norm=True, <your parameters>):
+        super().__init__(fchrom=fchrom, relative_norm=relative_norm)
+        # store your parameters here
+
+    def __call__(self, time):
+        # Compute the variability signal at BJD(TCB) times
+        # Must return an array-like with the same length as time
+        return <your expression>
+```
+
+### Guidelines for writing a new model
+
+1.  **Input time standard must be BJD(TCB)**\
+    This is the native Gaia astrometric timescale used throughout
+    `gaiamock_var`.
+
+2.  **Relative variation around the mean**, the model 
+    assumes that the Gaia astrometric calibration already removes the shift due to the average colour, 
+    therefore the implemented colour variation should subtract the mean or better should subtract directly the reported colour mean in Gaia. 
+
+3.  **`fchrom` must always be passed to the base class**\
+    This ensures  conversion from variability → chromatic
+    astrometric shift.
+
+4.  **Prefer vectorised NumPy expressions**\
+    Your implementation should efficiently handle numpy arrays of transit
+    times.
+
+
+### Example: exponential flare model
+
+``` python
+class FlareVariability(VariabilityTool):
+    def __init__(self, amp, tau, t0, fchrom, relative_norm=True):
+        super().__init__(fchrom=fchrom, relative_norm=relative_norm)
+        self.amp = amp
+        self.tau = tau
+        self.t0 = t0
+
+    def __call__(self, time):
+        dt = time - self.t0
+        return self.amp * np.exp(-np.clip(dt, 0, None) / self.tau)
+```
+
+

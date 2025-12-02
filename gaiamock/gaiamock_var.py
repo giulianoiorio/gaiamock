@@ -1060,15 +1060,18 @@ def run_full_astrometric_cascade(ra, dec,
     
     # potentially blended, so rerun 
     if (period > 1e4) and (res[-2] < 25) & (res[-6]/res[-5] > 5): 
-        t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, m1 = m1, m2 = m2, period = period, Tp = Tp, ecc = ecc, omega = omega, inc = inc_deg*np.pi/180, w=w, phot_g_mean_mag = phot_g_mean_mag, f=f, data_release=data_release, c_funcs=c_funcs, do_blending_noise = True,
+        t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, 
+                                                                                         m1 = m1, m2 = m2, period = period, Tp = Tp, ecc = ecc, 
+                                                                                         omega = omega, inc = inc_deg*np.pi/180, w=w, 
+                                                                                         phot_g_mean_mag = phot_g_mean_mag, f=f, data_release=data_release, 
+                                                                                         c_funcs=c_funcs, do_blending_noise = True,
                                                                                          variability_tool=variability_tool)
         N_visibility_periods = int(np.sum( np.diff(t_ast_yr*365.25) > 4) + 1)
         if (N_visibility_periods < 12) or (len(ast_obs) < 13): 
             if verbose:
                 print('not enough visibility periods!')
             return Nret*[0]
-        res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min, skip_acceleration=skip_acceleration,
-                                           variability_tool=variability_tool) 
+        res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min, skip_acceleration=skip_acceleration) 
 
     return res
     
@@ -1314,11 +1317,11 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     
     #Chromatic shift
     #Add chromaticity effect due to color variability
-    colors = variability_tool(jds)
-    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
-                                          fchrom=variability_tool.fchrom, 
-                                          relative_norm=variability_tool.relative_norm)
-    Lambda_pred += Lambda_chromatic
+    #colors = variability_tool(jds)
+    #Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+    #                                      fchrom=variability_tool.fchrom, 
+    #                                      relative_norm=variability_tool.relative_norm)
+    #Lambda_pred += Lambda_chromatic
     
     G, Msun = 6.6743e-11, 1.9884098e+30 # SI units
     K1_kms = 0.001*(2*np.pi*G*(m2*Msun) * (m2/(m1 + m2))**2 / (period*86400 *  (1 - ecc**2)**(3/2)))**(1/3) * np.sin(inc_deg*np.pi/180)

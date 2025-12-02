@@ -194,7 +194,7 @@ class RRLVariable(VariabilityTool):
         Ai=df[f"fund_freq1_harmonic_ampl_{band}"][:narm]
         Phii=df[f"fund_freq1_harmonic_phase_{band}"][:narm]
         iarm = np.arange(1,narm+1)
-        obs_average = df[f"int_average_{band}"]
+        obs_average = df[f"phot_{band}_mean_mag"] #Use this one instead of the one of the SOS because I think this is the one used in postprocessing for astometric calibration
     
         return LCtemplate(zp_mag=zp_mag, A=Ai, Phi=Phii, narm=narm, 
                           reference_time=reference_time, period=1/numax,
