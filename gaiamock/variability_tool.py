@@ -107,7 +107,7 @@ class LCtemplate:
             
         return np.sum([ -self.A[i]*dmod_dx[i]*np.sin(2*np.pi*self.iarm[i]*phase+self.Phi[i]) for i in range(self.narm) ],axis=0)
     
-class RRLVariable(vt.VariabilityTool):
+class RRLVariable(VariabilityTool):
     """
     Class to model RR Lyrae variability using Gaia SOS light curve harmonic decomposition.
     It reconstructs the BP and RP light curves from the Gaia SOS parameters, and computes the
