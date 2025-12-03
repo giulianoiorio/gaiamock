@@ -388,7 +388,14 @@ def rescale_times_astrometry(jd, data_release):
     
 #@TODO I added the variable do_blending noise, because it was used in the signature call of the same funciton in gaiamock
 #ask to Kareem why it is not present here
-def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc, w, phot_g_mean_mag, f, data_release, c_funcs, do_blending_noise = False, reject_10_percent = True):
+def predict_astrometry_luminous_binary(ra, dec, 
+                                       parallax, pmra, pmdec, 
+                                       m1, m2, period, 
+                                       Tp, ecc, omega, inc, w, 
+                                       phot_g_mean_mag, 
+                                       f, data_release, c_funcs, 
+                                       do_blending_noise = False, reject_10_percent = True,
+                                       variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function predicts the epoch-level astrometry for a binary as it would be observed by Gaia. 
     ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
@@ -406,6 +413,7 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     f: flux ratio, F2/F1, in the G-band. 
     data_release: 'dr3', 'dr4', or 'dr5'
     c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     '''
     
     t = get_gost_one_position(ra, dec, data_release=data_release)
@@ -438,12 +446,20 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     Lambda_com = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor # barycenter motion
     Lambda_pred = Lambda_com + bias # binary motion
 
+    #Chromatic shift
+    #Add chromaticity effect due to color variability
+    colors = variability_tool(jds)
+    Lambda_chromatic = gv.al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+                                          fchrom=variability_tool.fchrom, 
+                                          relative_norm=variability_tool.relative_norm)
+    Lambda_pred += Lambda_chromatic
+
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
     
     return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit_expect*np.ones(len(Lambda_pred))
 
 
-def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, period, Tp, ecc, omega, inc, w, a0_mas, phot_g_mean_mag, data_release, c_funcs):
+def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, period, Tp, ecc, omega, inc, w, a0_mas, phot_g_mean_mag, data_release, c_funcs, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function predicts the epoch-level astrometry for a binary as it would be observed by Gaia, in terms of a0 rather than m1 and m2 and f. It is only valid in the limit where the separation of the two stars is less than about 45 mas, so that the photocenter approximation works well. 
     
@@ -460,6 +476,7 @@ def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, per
     phot_g_mean_mag: G-band magnitude 
     data_release: 'dr3', 'dr4', or 'dr5'
     c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     '''
     
     t = get_gost_one_position(ra, dec, data_release=data_release)
@@ -487,6 +504,14 @@ def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, per
     
     Lambda_com = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor # barycenter motion
     Lambda_pred = Lambda_com + delta_eta # binary motion
+
+    #Chromatic shift
+    #Add chromaticity effect due to color variability
+    colors = variability_tool(jds)
+    Lambda_chromatic = gv.al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+                                          fchrom=variability_tool.fchrom, 
+                                          relative_norm=variability_tool.relative_norm)
+    Lambda_pred += Lambda_chromatic
 
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
     
@@ -908,7 +933,17 @@ def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_
     return return_array
 
 
-def run_full_astrometric_cascade(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc_deg, w, phot_g_mean_mag, f, data_release, c_funcs, verbose=False, show_residuals=False, ruwe_min = 1.4, skip_acceleration=False):
+def run_full_astrometric_cascade(ra, dec, 
+                                 parallax, pmra, pmdec, 
+                                 m1, m2, 
+                                 period, Tp, ecc, 
+                                 omega, inc_deg, w, 
+                                 phot_g_mean_mag, f, 
+                                 data_release, c_funcs, 
+                                 verbose=False, 
+                                 show_residuals=False, 
+                                 ruwe_min = 1.4, skip_acceleration=False,
+                                 variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function generates the mock 1D astrometry for a binary and then fits it with a cascade of astrometric models.  
     ra, dec: coordinates, in degrees
@@ -927,12 +962,21 @@ def run_full_astrometric_cascade(ra, dec, parallax, pmra, pmdec, m1, m2, period,
     data_release: 'dr3', 'dr4', or 'dr5'
     c_funcs: from read_in_C_functions()
     verbose: whether to print results of fitting. 
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     if show_residuals, plot the residuals of the best-fit 5-parameter solution and the best-fit orbital solution. This will only happen if an orbital solution is actually calculated (i.e., we get to that stage in the cascade.)
     '''
     if c_funcs is None:
         c_funcs = read_in_C_functions()
 
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, m1 = m1, m2 = m2, period = period, Tp = Tp, ecc = ecc, omega = omega, inc = inc_deg*np.pi/180, w=w, phot_g_mean_mag = phot_g_mean_mag, f=f, data_release=data_release, c_funcs=c_funcs)
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
+                                                                                     parallax = parallax, pmra = pmra, pmdec = pmdec, 
+                                                                                     m1 = m1, m2 = m2, 
+                                                                                     period = period, Tp = Tp, ecc = ecc, 
+                                                                                     omega = omega, inc = inc_deg*np.pi/180, 
+                                                                                     w=w, phot_g_mean_mag = phot_g_mean_mag, 
+                                                                                     f=f, data_release=data_release, 
+                                                                                     c_funcs=c_funcs,
+                                                                                     variability_tool=variability_tool)
     
     Nret = 23 # number of arguments to return 
     N_visibility_periods = int(np.sum( np.diff(t_ast_yr*365.25) > 4) + 1)
@@ -945,7 +989,13 @@ def run_full_astrometric_cascade(ra, dec, parallax, pmra, pmdec, m1, m2, period,
     
     return res
     
-def run_only_5par_solution(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc_deg, w, phot_g_mean_mag, f, data_release, c_funcs):
+def run_only_5par_solution(ra, dec, 
+                           parallax, pmra, pmdec, 
+                           m1, m2, period, 
+                           Tp, ecc, omega, inc_deg, w, 
+                           phot_g_mean_mag, f, 
+                           data_release, c_funcs,
+                           variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function generates the mock 1D astrometry for a binary and then fits it with a 5-parameter solution.
     ra, dec: coordinates, in degrees
@@ -963,11 +1013,19 @@ def run_only_5par_solution(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, e
     f: flux ratio, F2/F1, in the G-band. 
     data_release: 'dr3', 'dr4', or 'dr5'
     c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
     '''
     if c_funcs is None:
         c_funcs = read_in_C_functions()
 
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, m1 = m1, m2 = m2, period = period, Tp = Tp, ecc = ecc, omega = omega, inc = inc_deg*np.pi/180, w=w, phot_g_mean_mag = phot_g_mean_mag, f=f, data_release=data_release, c_funcs=c_funcs)
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
+                                                                                     parallax = parallax, pmra = pmra, pmdec = pmdec, 
+                                                                                     m1 = m1, m2 = m2, period = period, 
+                                                                                     Tp = Tp, ecc = ecc, 
+                                                                                     omega = omega, inc = inc_deg*np.pi/180, w=w, 
+                                                                                     phot_g_mean_mag = phot_g_mean_mag, f=f, 
+                                                                                     data_release=data_release, c_funcs=c_funcs, 
+                                                                                     variability_tool=variability_tool)
 
     res = fit_5par_solution_only(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err)
     return res
