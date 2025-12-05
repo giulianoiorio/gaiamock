@@ -42,8 +42,7 @@ class SimpleSinusoidal(VariabilityTool):
     def __call__(self, time):
         return self.amp * np.sin(2 * np.pi * time / self.period)
 
-### FOr RR Lyrae
-
+### For RR Lyrae
 class LCtemplate:
     """
     Class to model light curves using a Fourier series template.
@@ -199,3 +198,22 @@ class RRLVariable(VariabilityTool):
         return LCtemplate(zp_mag=zp_mag, A=Ai, Phi=Phii, narm=narm, 
                           reference_time=reference_time, period=1/numax,
                          obs_average=obs_average)
+    
+## Burst like signal
+
+class ColorBurst(VariabilityTool):
+    
+    def __init__(self, amp,  tpeak, dtrise, dtdecay, fchrom,relative_norm=True):
+        super().__init__(fchrom=fchrom,relative_norm=relative_norm)
+        self.amp = amp
+        self.tpeak = tpeak 
+        self.dtrise = dtrise
+        self.dtdecay = dtdecay
+
+    def __call__(self, time):
+        
+        func_form = lambda x: 1/(1 + np.exp(x))
+        x_rise = (time - self.tpeak)/self.dtrise
+        x_decay = (time - self.tpeak)/self.dtdecay
+
+        return self.amp * (func_form(x_rise) - func_form(x_decay))
