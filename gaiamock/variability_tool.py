@@ -211,9 +211,9 @@ class ColorBurst(VariabilityTool):
         self.dtdecay = dtdecay
 
     def __call__(self, time):
-        
-        func_form = lambda x: 1/(1 + np.exp(x))
-        x_rise = (time - self.tpeak)/self.dtrise
-        x_decay = (time - self.tpeak)/self.dtdecay
 
-        return self.amp * (func_form(x_rise) - func_form(x_decay))
+        fgau = lambda x, x0, sigma: np.exp(-0.5*((x - x0)/sigma)**2)
+
+        return self.amp * np.where(time < self.tpeak,
+                                   fgau(time, self.tpeak, self.dtrise),
+                                   fgau(time, self.tpeak, self.dtdecay))
