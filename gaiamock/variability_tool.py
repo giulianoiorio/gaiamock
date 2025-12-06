@@ -202,8 +202,29 @@ class RRLVariable(VariabilityTool):
 ## Burst like signal
 
 class ColorBurst(VariabilityTool):
+    """
+    Class to model burst-like color variability.
+    The color variability is modeled as a Gaussian rise and decay around a peak time.
+    Parameters:
+    amp: amplitude of the color variability (in mag)
+    tpeak: time of the peak of the burst (in days, BJD in Tdcb standard)
+    dtrise: rise time scale (in days)
+    dtdecay: decay time scale (in days)
+    fchrom: scaling factor to convert AL uncertainty to chromatic shift uncertainty.
+    relative_norm: if True, normalisaiton is relative to the AL uncertainty per CCD at given G mag; if False, absolute normalisation (mas).
+    """
     
     def __init__(self, amp,  tpeak, dtrise, dtdecay, fchrom,relative_norm=True):
+        """
+        Initialize the Color burst  variability model.
+        Parameters:
+        amp: amplitude of the color variability (in mag)
+        tpeak: time of the peak of the burst (in days, BJD in Tdcb standard)
+        dtrise: rise time scale (in days)
+        dtdecay: decay time scale (in days)
+        fchrom: scaling factor to convert AL uncertainty to chromatic shift uncertainty.
+        relative_norm: if True, normalisaiton is relative to the AL uncertainty per CCD at given G mag; if False, absolute normalisation (mas).
+        """
         super().__init__(fchrom=fchrom,relative_norm=relative_norm)
         self.amp = amp
         self.tpeak = tpeak 
@@ -211,6 +232,13 @@ class ColorBurst(VariabilityTool):
         self.dtdecay = dtdecay
 
     def __call__(self, time):
+        """
+        Evaluate the color variability (BP-RP) at given times.
+        Parameters:
+        time: array-like, times at which to evaluate the color variability.
+              The input time  is in Barycentric Julian Date (BJD) in Barycentric Coordinated Time (TCB) standard.
+        Returns: array-like, color variability values at the given times which average to zero.
+        """
 
         fgau = lambda x, x0, sigma: np.exp(-0.5*((x - x0)/sigma)**2)
 

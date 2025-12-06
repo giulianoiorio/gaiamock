@@ -243,9 +243,37 @@ from variability_tool import SimpleSinusoidal
 vt = SimpleSinusoidal(amp=0.05, period=0.6, fchrom=1.0)
 bias = vt(time_bjd_tcb)
 ```
+
+#### 2. Burst-like signal
+
+``` python
+class ColorBurst(VariabilityTool)
+```
+
+A class to model a burst like increase (or decrease) of color
+it is modelled as a split Gaussian with: 
+
+**Parameters:**
+
+-   `amp`: (BP-RP) value at the peak (positive if the burst is reddening the source, negative otherwise)
+-   `tpeak`: time of the peak 
+-   `dtrise`: time scale for the rising part (decreasing part if amp<0)
+-   `dtdecay`: time scale for the decaying part (incresing part if amp<0)
+-   `fchrom`: chromatic-scaling factor
+-   `relative_norm`: whether the normalisation is relative or absolute
+
+``` python
+from variability_tool import ColorBurst
+#JBDTCB ≈ 2456863.5 to 2459000.5 #Range of days in GaiaDR3
+tpeak_tcbjd = 2457063.5
+cb=vt.ColorBurst(amp=-1,tpeak=2457063,dtrise=5,dtdecay=30,fchrom=1)
+bias = vt(time_bjd_tcb)
+```
+
+
 ------------------------------------------------------------------------
 
-#### 2. RRLVariable: RR Lyrae variability from Gaia SOS harmonic models
+#### 3. RRLVariable: RR Lyrae variability from Gaia SOS harmonic models
 
 ``` python
 class RRLVariable(VariabilityTool)
