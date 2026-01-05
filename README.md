@@ -155,12 +155,12 @@ by simply estimating the flux luminosity at each scanning time, rather than usin
 The flux luminosity is defined such as (see [El-Badry+24](https://ui.adsabs.harvard.edu/abs/2024OJAp....7E.100E/abstract))
 
 $$
-f = 10^{\frac{G_1 -G_2}{2.5}}, 
+f =  \frac{L_2}{L_1} = 10^{-\frac{G_2 -G_1}{2.5}} =  10^{\frac{G_1 -G_2}{2.5}}, 
 $$
-where $G_1$ is the most luminous star, so that we have always $0 \leq f \leq1$. 
+where the subscript 1 refers to the most luminous star, so that we have always $0 \leq f \leq1$. 
 If one of the two stars (let's assume the most luminous one) is a variable star, the current  version of Gaiamock uses the average G-band magnitude, so
 $$
-f = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}}, 
+f  = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}}, 
 $$. 
 
 The true flux ratio will be instead 
