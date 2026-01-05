@@ -182,6 +182,9 @@ We further modify  the module **gaiamock_var**, updating the following functions
 All the functions already have the parameter `variability_tool` (be an instance of the class  `VariabilityTool`), so the additions is just a call to the class method 
 `g_lcurve_normalised` (a new upated method required for all the `VariabilityTool` istances) that returns the G-band values (rescaled over the mean)  at given scanning times. These values are then used to estimate $f_\mathrm{var}$ and use them as input for the function `al_bias_binary` returning the binary+ivm shift. 
 If the star is not variabile it will return as usuale only the binary astrometric shift. There is not need to update other functions because the parameter `variability_tool` is already included in all the other relevant functions. In addition it is not needed to update functions to retrieve astrometry for single stars because contrary to the chromatic effect, this IVM effect is only present in binary systems.
+of large photometric variations and/or stars with similar magnitude, the role of the primary and secondary can switch, in this case $f>1$ and we switch primary and secondary by estimating the corrected flux ratio as $1/f$ and the corrected mass ratio as $1/q=m_1/m_2$.
+
+We have modified the  module `gaiamock_mod` also accepts this extra parameter.
 
 ## The VariabilityTool class 
 
