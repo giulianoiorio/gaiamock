@@ -57,7 +57,10 @@ import gaiamock_mod as gaiamock
 ```
 and use the same functions you would use in gaiamock, e.g. for predicting epoch astrometry and computing RUWE. 
 
-# A modified version to include the chromaticity effect due to star Variability
+# A modified version to include the photometric shift in binary and the chromaticity effect due to star Variability
+
+
+## Chromaticity effect
 
 IN Gaia, the measured along-scan (AL) centroid of a star depends not only on its true astrometric motion but also on its spectral
 energy distribution (SED).
@@ -113,7 +116,7 @@ $$
 
 In thi case the effect of the chromatic shfit will be larger for bright source with small astrometric  uncertanties and becomes negligible for faint source.
 
-## Implementation
+### Implementation
 
 We added the module **gaiamock_var**, which includes the same functions as the standard `gaiamock` module,  
 but with variations in the following functions:
@@ -141,9 +144,48 @@ Currently available classes include:
 
 The section below describes how to use the available classes and how to implement new ones.
 
-### The VariabilityTool class 
+## Astrometric shift induced by variability in binary 
 
-#### VariabilityTool: framework for modelling variability-induced chromatic shifts
+As described in [Halbwachs+23](http://arxiv.org/abs/2206.05726), 
+in the case of a binary system hosting a variable source, the source variability causes a change in the flux ratio of the two sources changing the along-scan position of the photocentre, the so called "variability induced movers" (VIM). 
+This effect if actually searched for in the astrometric binary analysis in Gaia DR3 with a dedicated model.  
+Concerning the gaiamock, this effect can be easily introduced 
+by simply estimating the flux luminosity at each scanning time, rather than using a simple value. 
+
+The flux luminosity is defined such as (see [El-Badry+24](https://ui.adsabs.harvard.edu/abs/2024OJAp....7E.100E/abstract))
+
+$$
+f = 10^{\frac{G_1 -G_2}{2.5}}, 
+$$
+where $G_1$ is the most luminous star, so that we have always $0 \leq f \leq1$. 
+If one of the two stars (let's assume the most luminous one) is a variable star, the current  version of Gaiamock uses the average G-band magnitude, so
+$$
+f = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}}, 
+$$. 
+
+The true flux ratio will be instead 
+$$
+f_\mathrm{var}(t) = 10^{\frac{G_1(t) -G_2}{2.5}} = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}} 10^{\frac{G_1(t) - \langle G_1 \rangle}{2.5}} = 
+f 10^{\frac{\delta G_1(t)}{2.5}}
+$$
+
+So the final time dependent flux ratio is equal to the standard averaged one times a correction that depends of the magnitude variation rescaled to have mean magnitude 0. 
+In case of large photometric variations and/or stars with similar magnitude, the role of the primary and secondary can switch. 
+
+### Implementation 
+
+We further modify  the module **gaiamock_var**, updating the following functions:
+
+- `predict_astrometry_luminous_binary`
+- `predict_astrometry_and_rvs_simultaneously`
+
+All the functions already have the parameter `variability_tool` (be an instance of the class  `VariabilityTool`), so the additions is just a call to the class method 
+`g_lcurve_normalised` (a new upated method required for all the `VariabilityTool` istances) that returns the G-band values (rescaled over the mean)  at given scanning times. These values are then used to estimate $f_\mathrm{var}$ and use them as input for the function `al_bias_binary` returning the binary+ivm shift. 
+If the star is not variabile it will return as usuale only the binary astrometric shift. There is not need to update other functions because the parameter `variability_tool` is already included in all the other relevant functions. In addition it is not needed to update functions to retrieve astrometry for single stars because contrary to the chromatic effect, this IVM effect is only present in binary systems.
+
+## The VariabilityTool class 
+
+### VariabilityTool: framework for modelling variability-induced chromatic shifts
 
 The `VariabilityTool` framework provides a unified and extensible
 interface to model **intrinsic photometric variability** and its impact
@@ -158,8 +200,10 @@ All variability models implemented within this framework must:
 -   Define the attributes
     -   `fchrom`: scaling factor converting AL uncertainty into chromatic shift.
     -   `relative_norm`: boolean flag controlling the normalisation scheme
--   Implement the `__call__(time)` method returning a colour- or
-    flux-variability signal evaluated at BJD(TCB) times
+-   Implement the `__call__(self,time)` method returning a colour
+    variability signal evaluated at BJD(TCB) times (rescaled for the colour average).
+-   Implement the `g_lcurve_normalised(self,time)` method returning the 
+    flux-variability signal evaluated at BJD(TCB) times (rescaled for the magnitude average).
 
 The goal is to provide a standardised way to inject colour variability
 and study its effect on Gaia astrometric solutions---while ensuring
@@ -167,7 +211,7 @@ backward compatibility when no variability is applied.
 
 ------------------------------------------------------------------------
 
-#### \### Core concept and behaviour
+#### Core concept and behaviour
 
 The base class:
 
@@ -175,6 +219,7 @@ The base class:
 class VariabilityTool:
     def __init__(self, fchrom, relative_norm=True)
     def __call__(self, time)
+    def g_lcurve_normalised(self,time)
 ```
 
 implements the following logic:
@@ -196,7 +241,7 @@ implements the following logic:
     The induced astrometric shift becomes larger for bright stars (with
     smaller AL uncertainties) and smaller for faint stars. This value corresponds to the expected shift for a colour variability (with respect to the mean) of 1 mag
 
--   **`__call__(time)`**\
+-   **`__call__(self,time)`**\
     This is the function that will be called in Gaiamock to get the colour at at given time of 
     Gaia observations, then it will be internally transformed to a shift based on the parameter 
     `fchrom` and `relative_norm`
@@ -206,6 +251,13 @@ implements the following logic:
     the standard `gaiamock` behaviour.
     **Note**, when called within Gaiamock the time will be in BJD in TCB. 
 
+- **`g_lcurve_normalised(self,time)`**\
+    This is the function that will be called in Gaiamock to get the flux  at at given time of  Gaia observations, then it will be used to estimate the flux ratio and then along-scan position in combination with the shift due to the binary motion.
+    The base implementation returns zero variability, making
+    `VariabilityTool` a no-op. Using the default instance
+    or not overloading the method ensures perfect backward compatibility with
+    the standard `gaiamock` behaviour.
+    **Note**, when called within Gaiamock the time will be in BJD in TCB. 
 
 Typical usage:
 
@@ -318,6 +370,7 @@ $$
 from variability_tool import RRLVariable
 vt = RRLVariable(gaiadf=sos_row, fchrom=1.0, relative_norm=False)
 color_variation = vt(time_bjd_tcb)
+Gmag_variation = vt.g_lcurve_normalised(time_bjd_tcb)
 ```
 
 This class is ideal forsimulations of RR Lyrae astrometric biases in Gaia-like pipelines.
@@ -343,7 +396,12 @@ class MyCustomVariability(VariabilityTool):
         # store your parameters here
 
     def __call__(self, time):
-        # Compute the variability signal at BJD(TCB) times
+        # Compute the colour variability signal at BJD(TCB) times
+        # Must return an array-like with the same length as time
+        return <your expression>
+
+    def g_lcurve_normalised(self, time):
+        # Compute the magnitude variability signal at BJD(TCB) times
         # Must return an array-like with the same length as time
         return <your expression>
 ```
@@ -371,15 +429,22 @@ class MyCustomVariability(VariabilityTool):
 
 ``` python
 class FlareVariability(VariabilityTool):
-    def __init__(self, amp, tau, t0, fchrom, relative_norm=True):
+    def __init__(self, amp_g, amp_color, tau, t0, fchrom, relative_norm=True):
         super().__init__(fchrom=fchrom, relative_norm=relative_norm)
-        self.amp = amp
+        self.amp_g = amp_g
+        self.amp_color = amp_color
         self.tau = tau
         self.t0 = t0
 
     def __call__(self, time):
         dt = time - self.t0
-        return self.amp * np.exp(-np.clip(dt, 0, None) / self.tau)
+        return self.amp_color * np.exp(-np.clip(dt, 0, None) / self.tau)
+
+    def g_lcurve_normalised(self, time):
+        # Compute the magnitude variability signal at BJD(TCB) times
+        # Must return an array-like with the same length as time
+        dt = time - self.t0
+        return self.amp_g * np.exp(-np.clip(dt, 0, None) / self.tau)
 ```
 
 
