@@ -510,8 +510,14 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     # and <G> is the mean magnitude of the system (phot_g_mean_mag) used to estimate f 
     G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
     f_variable = f * 10**(0.4*G_magnitude_normalised)
-    
-    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f_variable) for i in range(len(psi))])
+
+    #Deal with possibile switch of primary (most luminous)/secondary due to variability
+    #If f_variable>1, we have to switch primary and secondary so that f'=1/f
+    #and q'=1/q=m1/m2.
+    f_variable_final = np.where(f_variable<1,f_variable,1/f_variable) #if f>1
+    q_variable_final = np.where(f_variable<1,m2/m1,m1/m2)
+
+    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=q_variable_final[i], f=f_variable_final[i]) for i in range(len(psi))])
     Lambda_com = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor # barycenter motion
     Lambda_pred = Lambda_com + bias # binary motion
 
@@ -1335,7 +1341,14 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     # and <G> is the mean magnitude of the system (phot_g_mean_mag) used to estimate f 
     G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
     f_variable = f * 10**(0.4*G_magnitude_normalised)
-    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f_variable) for i in range(len(psi))])
+
+    #Deal with possibile switch of primary (most luminous)/secondary due to variability
+    #If f_variable>1, we have to switch primary and secondary so that f'=1/f
+    #and q'=1/q=m1/m2.
+    f_variable_final = np.where(f_variable<1,f_variable,1/f_variable) #if f>1
+    q_variable_final = np.where(f_variable<1,m2/m1,m1/m2)
+
+    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=q_variable_final[i], f=f_variable_final[i]) for i in range(len(psi))])
     Lambda_pred = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor + bias
     
     #Chromatic shift
