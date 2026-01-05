@@ -442,19 +442,7 @@ def predict_astrometry_luminous_binary(ra, dec,
     
     x, y = B_pred*X + G_pred*Y, A_pred*X + F_pred*Y   
     delta_eta = (-y*cpsi - x*spsi) 
-    #GI 05/01/2025: Now account for the effect of variability in the G-band
-    #the variability introduce a modulation of the flux ratio that affect the photocenter position
-    #this effect is indeed used to fit the so called "variability induced movers" (VIM) in Gaia DR3
-    #(see Halbwachs+23 paper, Section 6 https://ui.adsabs.harvard.edu/abs/2023A%26A...674A...9H/abstract)
-    # Considering that f=10**(G1-G2)/2.5, where G1 and G2 are the magnitudes of the two components (G1 is the brighter one),
-    # we can write the flux ratio including variability as:
-    # f_new = f * 10**(0.4*delta_G(t))
-    # where delta_G(t)=G(t) - <G> and G(t) is the instantaneous magnitude of the system at time t
-    # and <G> is the mean magnitude of the system (phot_g_mean_mag) used to estimate f 
-    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
-    f_variable = f * 10**(0.4*G_magnitude_normalised)
-
-    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f_variable) for i in range(len(psi))])
+    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f) for i in range(len(psi))])
     Lambda_com = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor # barycenter motion
     Lambda_pred = Lambda_com + bias # binary motion
 
@@ -1231,19 +1219,7 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     
     x, y = B_pred*X + G_pred*Y, A_pred*X + F_pred*Y   
     delta_eta = (-y*cpsi - x*spsi) 
-    #GI 05/01/2025: Now account for the effect of variability in the G-band
-    #the variability introduce a modulation of the flux ratio that affect the photocenter position
-    #this effect is indeed used to fit the so called "variability induced movers" (VIM) in Gaia DR3
-    #(see Halbwachs+23 paper, Section 6 https://ui.adsabs.harvard.edu/abs/2023A%26A...674A...9H/abstract)
-    # Considering that f=10**(G1-G2)/2.5, where G1 and G2 are the magnitudes of the two components (G1 is the brighter one),
-    # we can write the flux ratio including variability as:
-    # f_new = f * 10**(0.4*delta_G(t))
-    # where delta_G(t)=G(t) - <G> and G(t) is the instantaneous magnitude of the system at time t
-    # and <G> is the mean magnitude of the system (phot_g_mean_mag) used to estimate f 
-    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
-    f_variable = f * 10**(0.4*G_magnitude_normalised)
-
-    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f_variable) for i in range(len(psi))])
+    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f) for i in range(len(psi))])
     Lambda_pred = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor + bias
     
     
