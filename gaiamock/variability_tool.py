@@ -22,6 +22,8 @@ class VariabilityTool:
         self.fchrom=fchrom
         self.relative_norm=relative_norm
 
+        #Needed when the proper Gmag is needed,
+        #If not intialised in the derived star constructor they will remain with a value of 0
         self.average_g = 0. 
         self.average_bp = 0.
         self.average_rp = 0.
@@ -152,6 +154,8 @@ class RRLVariable(VariabilityTool):
         self.LCtemplate_rp = self.reconstruct_lc(gaiadf,band="rp")
         self.LCtemplate_g = self.reconstruct_lc(gaiadf,band="g")
 
+        #Initialise the average G, BP, RP as taken form the Gaia source
+        #These can be used to retrive the non-scaled light-curves
         self.average_g = self.LCtemplate_g.obs_average
         self.average_bp = self.LCtemplate_bp.obs_average
         self.average_rp = self.LCtemplate_rp.obs_average
