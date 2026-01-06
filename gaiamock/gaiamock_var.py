@@ -395,6 +395,87 @@ def check_9par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned=True):
     s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
     return F2, s, mu, sigma_mu
 
+def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.), data_release='dr3'):
+    '''
+    Thi s function takes a set of astrometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err) 
+    and fits a VIMF (fixed variability-induced motion) solution. 
+    The fixed VIMF model assumes that the orbital motion of the components relative to their barycenter is negligible during the Gaia mission.
+    The parameters are the same of the 5-par solution (ra, pmra, dec, pmdec, plx) plus
+    2 parameters describing the direction and amplitude of the VIM effect.
+    The model is described in detail in  Halbwachs+23 (Sec. 6, https://www.aanda.org/articles/aa/pdf/2023/06/aa43969-22.pdf).
+    The final shift is  
+    delta_AL_VIM = delta_AL_5par +  D_alpha*(<F>/F-1)*sin(psi) * D_delta*(<F>/F-1)*cos(psi)
+    where D_alpha and D_delta are the two VIMF parameters to be fitted, <F> is the mean flux, and F is the instantaneous flux.
+    While delta_AL_5par is the standard 5-parameter astrometric model: (alpha + mu_alpha*t) * sin(psi) + (delta + mu_delta*t)*cos(psi) + parallax_factor*plx. 
+
+    Now the ratio <F>/F can be written in terms of magnitudes as:
+    <F>/F = 10**(0.4*(m - <m>))
+    where m is the instantaneous magnitude, and <m> is the mean magnitude.
+    If we use as usual a rescaled magnitude difference dm = m - <m>, we have:
+    <F>/F - 1 = 10**(0.4*dm) - 1, 
+
+    So rearring the equation for delta_AL_VIM to be consisent with the standard linear  model, we have:
+    delta_AL_VIM = [alpha + mu_alpha*t + D_alpha*(10**(0.4*dm) - 1)] * sin(psi) +
+                   [delta + mu_delta*t + D_delta*(10**(0.4*dm) - 1)] * cos(psi) +
+                   parallax_factor*plx
+
+    The function requires a variability_tool object from variability_tool.py to calculate dm at each epoch.
+    It also requires the data_release to calculate the correct times (t_ast_yr) from
+    the observation times in JD.
+
+    It inflates the uncertainties according to the goodness of fit and returns the best-fit parameters and uncertainties and F2 and significance associated with the solution.
+    The vector of best-fit parameters is:
+    mu = [ra, pmra, D_alpha, dec, pmdec, D_delta, plx], accordingly the errors are
+    sigma_mu = [sigma_ra, sigma_pmra, sigma_D_alpha, sigma_dec, sigma_pmdec, sigma_D_delta, sigma_plx]
+
+    @TODO: implement an iterative procedure to include photometric uncertainties in the final errors on D_alpha and D_delta.
+    Note: in this implementation we are assuming that the photrometric uncertainties are negligible compared to the astrometric ones, so we are not including them in the Cinv matrix.
+          if this not the case, the final errors depends also on D_alpha and D_delta (see Halbwachs+23, Eq. 18), so an iterative procedure should be implemented.
+    '''
+    Cinv = np.diag(1/ast_err**2)  #Errors 
+
+    tbjd = get_jd_from_tast_yr(t_ast_yr, data_release=data_release)
+    dG = variability_tool.g_lcurve_normalised(tbjd) # magnitude difference from the mean magnitude at each epoch
+    flux_factor = 10**(0.4*dG) - 1
+    M = np.vstack([np.sin(psi),                 #alpha
+                   t_ast_yr*np.sin(psi),        #mu_alpha
+                   flux_factor*np.sin(psi),     #D_alpha
+                   np.cos(psi),                 #delta
+                   t_ast_yr*np.cos(psi),        #mu_delta
+                   flux_factor*np.cos(psi),     #D_delta
+                   plx_factor]).T               #parallax
+
+    mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+    Lambda_pred = np.dot(M, mu)
+    resids = ast_obs - Lambda_pred
+    Nobs, nu, nu_unbinned = len(ast_obs), len(ast_obs) - 7, len(ast_obs)*8 - 7 #/ 7 parameters: ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+
+    #Estimate F2 (equation 1 in Halbwachs+23)
+    chi2_red_binned = np.sum(resids**2/ast_err**2)/nu
+    chi2_red_unbinned = predict_reduced_chi2_unbinned_data(chi2_red_binned = chi2_red_binned, n_param = 7, N_points = Nobs, Nbin=8)
+    if binned:
+        F2 = predict_F2_unbinned_data(chi2_red_binned = chi2_red_binned, n_param = 7, N_points = Nobs, Nbin=8)
+        cc = np.sqrt(chi2_red_unbinned/((1-2/(9*nu_unbinned))**3 ))
+    else:
+        F2 = np.sqrt(9*nu/2)*(chi2_red_binned**(1/3) + 2/(9*nu) -1  )
+        cc = np.sqrt(chi2_red_binned/((1-2/(9*nu))**3 ))
+
+    #Estimate the significance, i.e. a statistic to quantify if the addition of two parameters is 
+    #justified by the data (equation 3 in Halbwachs+23).
+    #In this case the two additional parameters are D_alpha and D_delta (indices 2 and 5 in the mu vector)
+    cov_matrix = np.linalg.inv(M.T @ Cinv @ M)
+    sigma_mu = cc*np.sqrt(np.diag(cov_matrix))
+    cov25 = cov_matrix[2][5]*cc**2
+    
+    p1, p2, sig1, sig2 = mu[2], mu[5], sigma_mu[2], sigma_mu[5]
+    rho12 = cov25/(sig1*sig2)
+    s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
+    
+    #F2 is goodness of fit statistic (Eq. 1 in Halbwachs+23)
+    #s is significance of the VIMF solution (Eq. 3 in Halbwachs+23)
+    #mu is the best-fit parameters vector: [ra, pmra, D_alpha, dec, pmdec, D_delta, plx]
+    #sigma_mu is the uncertainties vector: [sigma_ra, sigma_pmra, sigma_D_alpha, sigma_dec, sigma_pmdec, sigma_D_delta, sigma_plx]
+    return F2, s, mu, sigma_mu
 
 def al_bias_binary(delta_eta, q, f, u = 90):
     '''
@@ -446,6 +527,20 @@ def rescale_times_astrometry(jd, data_release):
         raise ValueError('invalid data_release!')
     t_ast_yr = t_ast_day/365.25
     return t_ast_yr
+
+def get_jd_from_tast_yr(t_ast_yr, data_release):
+    '''
+    inverse of rescale_times_astrometry()
+    '''
+    if data_release == 'dr3':
+        jd = t_ast_yr*365.25 + 2457389.0
+    elif data_release == 'dr4':
+        jd = t_ast_yr*365.25 + 2457936.875
+    elif data_release == 'dr5':
+        jd = t_ast_yr*365.25 + 2458818.5
+    else: 
+        raise ValueError('invalid data_release!')
+    return jd
     
 def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc, w, phot_g_mean_mag, f, data_release, c_funcs, do_blending_noise = False, reject_10_percent = True, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
