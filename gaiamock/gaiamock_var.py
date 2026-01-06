@@ -431,12 +431,14 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, varia
     @TODO: implement an iterative procedure to include photometric uncertainties in the final errors on D_alpha and D_delta.
     Note: in this implementation we are assuming that the photrometric uncertainties are negligible compared to the astrometric ones, so we are not including them in the Cinv matrix.
           if this not the case, the final errors depends also on D_alpha and D_delta (see Halbwachs+23, Eq. 18), so an iterative procedure should be implemented.
+          To add the photometric uncertanties give a look to https://www.cosmos.esa.int/web/gaia/science-performance
     '''
     Cinv = np.diag(1/ast_err**2)  #Errors 
 
     tbjd = get_jd_from_tast_yr(t_ast_yr, data_release=data_release)
     dG = variability_tool.g_lcurve_normalised(tbjd) # magnitude difference from the mean magnitude at each epoch
     flux_factor = 10**(0.4*dG) - 1
+
     M = np.vstack([np.sin(psi),                 #alpha
                    t_ast_yr*np.sin(psi),        #mu_alpha
                    flux_factor*np.sin(psi),     #D_alpha
