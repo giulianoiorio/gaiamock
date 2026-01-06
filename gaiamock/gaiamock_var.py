@@ -28,6 +28,16 @@ def al_uncertainty_per_ccd_interp(G):
     sigma_eta = [0.4, 0.35, 0.15, 0.17, 0.23, 0.13,0.13, 0.135, 0.125, 0.13, 0.15, 0.23, 0.36, 0.63, 1.05, 2.05, 4.1]
     return np.interp(G, G_vals, sigma_eta)
 
+def photometric_uncertainty_per_ccd_interp(G):
+    '''
+    This gives the photometric uncertainty *per CCD* (not per FOV transit) as an interpolation 
+    of values obtained with the tool provided by Gaia for the EDR3 uncertanties (https://www.cosmos.esa.int/web/gaia/fitted-dr3-photometric-uncertainties-tool)
+    '''    
+    G_vals     = [4,5, 6,  6.5,   7, 7.5, 8.,8.5, 9, 9.5, 10, 10.3, 10.7, 11,  11.3, 11.8,   12.5,    13, 13.5,  14,  15,   16,   17,   18,   19,  20]
+    sigma_phot = [0.02,0.013,0.005,0.003,0.003,0.003,0.004,0.004,0.003,0.003,0.003,0.004,0.003,0.003,0.005,0.003,0.004,0.004,0.003,0.004,0.005,0.008,0.014,0.024,0.044,0.085]
+    return np.interp(G, G_vals, sigma_phot)
+
+
 
 def al_chromatic_shift(Gmean,delta_bp_rp,fchrom=0.2,relative_norm=True):
     '''
@@ -428,10 +438,26 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, varia
     mu = [ra, pmra, D_alpha, dec, pmdec, D_delta, plx], accordingly the errors are
     sigma_mu = [sigma_ra, sigma_pmra, sigma_D_alpha, sigma_dec, sigma_pmdec, sigma_D_delta, sigma_plx]
 
-    @TODO: implement an iterative procedure to include photometric uncertainties in the final errors on D_alpha and D_delta.
-    Note: in this implementation we are assuming that the photrometric uncertainties are negligible compared to the astrometric ones, so we are not including them in the Cinv matrix.
-          if this not the case, the final errors depends also on D_alpha and D_delta (see Halbwachs+23, Eq. 18), so an iterative procedure should be implemented.
-          To add the photometric uncertanties give a look to https://www.cosmos.esa.int/web/gaia/science-performance
+
+    ##Dealing with photometric uncertainties:
+    If photometric_uncertainties=True, the function adds random Gaussian errors to the magnitudes at each epoch according to the G-band photometric uncertainties.
+    Then it implements an iterative procedure to re-calculate the astrometric uncertainties including the contribution from photometric uncertainties,
+    and re-fits the VIMF model until convergence is reached (or a maximum of 5 iterations).
+    This is important because the photometric uncertainties propagate into the astrometric model via the VIMF terms.
+    From Halbwachs+23, Eq. 19 the final astrometric uncertainties including the contribution from photometric uncertainties are:
+    sigma_total = sqrt( sigma_astrometry^2 + sigma_mod^2 )
+    where sigma_astrometry are the original astrometric uncertainties (ast_err), and sigma_mod is the contribution from photometric uncertainties.
+    From Halbwachs+23 Eq. 18: sigma_mod = sigma_F * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    now since F propto 10**(-G/2.5), we have sigma_F = sqrt( (d F /d G)^2 sigma_G^2) = sqrt(10**(-G/2.5) * -ln(10)/2.5 * sigma_G)^2 =  ln(10)/2.5 * F * sigma_G
+    so sigma_mod = ln(10)/2.5 * F * sigma_G * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)| = ln(10)/2.5 * sigma_G * F_ref/F * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    but Fref/F = 10**(0.4*dG) = flux_factor + 1, so finally:   sigma_mod = ln(10)/2.5 * sigma_G * (flux_factor + 1) * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    
+    ### Photometric uncertainties derivation:
+    Following https://www.cosmos.esa.int/web/gaia/science-performance
+    The G-band photometric uncertainty per CCD observation is given by:
+    sigma_G_ccd = 1.2e-3 * sqrt(0.04895*10**(0.4*(G-15)) + 1.8633*10**(0.8*(G-15)) + 0.0001985*10**(1.2*(G-15)))
+    The uncertainty per FoV transit (8 CCDs) is then:
+    sigma_G_fov = sigma_G_ccd / sqrt(8)     
     '''
     Cinv = np.diag(1/ast_err**2)  #Errors 
 
@@ -464,12 +490,16 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, varia
 
     #If we are including photometric uncertainties, we should now re-calculate the astrometric uncertainties including the contribution from photometric uncertainties.
     #In this case the updated errors must be used to estimate the F2 statisc 
+    #From Halbwachs+23, Eq. 18: sigma_mod = sigma_F * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    #now since F propto 10**(-G/2.5), we have sigma_F = sqrt( (d F /d G)^2 sigma_G^2) = sqrt(10**(-G/2.5) * -ln(10)/2.5 * sigma_G)^2 =  ln(10)/2.5 * F * sigma_G
+    #so sigma_mod = ln(10)/2.5 * F * sigma_G * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)| = ln(10)/2.5 * sigma_G * F_ref/F * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    #but Fref/F = 10**(0.4*dG) = flux_factor + 1, so finally:   sigma_mod = ln(10)/2.5 * sigma_G * (flux_factor + 1) * |D_alpha*sin(psi) + D_delta*cos(psi)|
     if photometric_uncertainties:
         D_alpha, D_delta = mu[2], mu[5]
         D_alpha_old, D_delta_old, iteration = D_alpha*100, D_delta, 0
         while (np.abs(D_alpha - D_alpha_old)/np.abs(D_alpha_old) > 1e-3 or np.abs(D_delta - D_delta_old)/np.abs(D_delta_old) > 1e-3) and iteration < 5:
             D_alpha_old, D_delta_old = D_alpha, D_delta
-            sigma_mod = np.log(10)/2.5 * Gerr * flux_factor * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+            sigma_mod = np.log(10)/2.5 * Gerr * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
             ast_err_updated = np.sqrt( ast_err**2 + sigma_mod**2)
             Cinv = np.diag(1/ast_err_updated**2)  #Updated Errors
             mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
