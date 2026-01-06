@@ -439,10 +439,11 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, varia
 
     #Error treatment 
     sigma_G = lambda G: 0 #placeholder function @TODO: implement a function to get G-band photometric uncertainties as a function of G magnitude and data release.
+    G     = variability_tool.average_g + variability_tool.g_lcurve_normalised(tbjd) # true G - <G>  
+    Gerr  = sigma_G(G)  # photometric uncertainties at each epoch
     if photometric_uncertainties:
-        G     = variability_tool.g_lcurve_magnitude_errors(tbjd) # true G - <G>  
-        dGobs = G + sigma_G(G)*np.random.normal(0,1,len(G))  # Errors added to the magnitudes
-        dGobs = dGobs - np.mean(dGobs)  # rescale to mean zero, because the model is generated without errors, but we want to maitain the assumption that dG is rescaled to <G>  
+        Gobs = G + Gerr*np.random.normal(0,1,len(G))  # Errors added to the magnitudes
+        dGobs = Gobs - np.mean(Gobs)  # rescale to mean zero, because the model is generated without errors, but we want to maitain the assumption that dG is rescaled to <G>  
         flux_factor = 10**(0.4*dGobs) - 1
     else:
         dG = variability_tool.g_lcurve_normalised(tbjd) # magnitude difference from the mean magnitude at each epoch
@@ -462,23 +463,31 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, varia
     Lambda_pred = np.dot(M, mu)
 
     #If we are including photometric uncertainties, we should now re-calculate the astrometric uncertainties including the contribution from photometric uncertainties.
+    #In this case the updated errors must be used to estimate the F2 statisc 
     if photometric_uncertainties:
-        #@TODO: implement an iterative procedure to converge on the final solution.
         D_alpha, D_delta = mu[2], mu[5]
-        sigma_mod = np.log(10)/2.5 * sigma_G( G ) *  flux_factor * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
-        ast_err_updated = np.sqrt( ast_err**2 + sigma_mod**2)
-        Cinv = np.diag(1/ast_err_updated**2)  #Updated Errors
-        mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
-        Lambda_pred = np.dot(M, mu)
-
-
+        D_alpha_old, D_delta_old, iteration = D_alpha*100, D_delta, 0
+        while (np.abs(D_alpha - D_alpha_old)/np.abs(D_alpha_old) > 1e-3 or np.abs(D_delta - D_delta_old)/np.abs(D_delta_old) > 1e-3) and iteration < 5:
+            D_alpha_old, D_delta_old = D_alpha, D_delta
+            sigma_mod = np.log(10)/2.5 * Gerr * flux_factor * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+            ast_err_updated = np.sqrt( ast_err**2 + sigma_mod**2)
+            Cinv = np.diag(1/ast_err_updated**2)  #Updated Errors
+            mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+            Lambda_pred = np.dot(M, mu)
+            D_alpha, D_delta = mu[2], mu[5]
+            iteration += 1  
+        ast_err_VIMF = ast_err_updated
+    else:
+        ast_err_VIMF = ast_err
+    
+    
 
     ##Now residuals and statistic
     resids = ast_obs - Lambda_pred
     Nobs, nu, nu_unbinned = len(ast_obs), len(ast_obs) - 7, len(ast_obs)*8 - 7 #/ 7 parameters: ra, pmra, D_alpha, dec, pmdec, D_delta, plx
 
     #Estimate F2 (equation 1 in Halbwachs+23)
-    chi2_red_binned = np.sum(resids**2/ast_err**2)/nu
+    chi2_red_binned = np.sum(resids**2/ast_err_VIMF**2)/nu
     chi2_red_unbinned = predict_reduced_chi2_unbinned_data(chi2_red_binned = chi2_red_binned, n_param = 7, N_points = Nobs, Nbin=8)
     if binned:
         F2 = predict_F2_unbinned_data(chi2_red_binned = chi2_red_binned, n_param = 7, N_points = Nobs, Nbin=8)

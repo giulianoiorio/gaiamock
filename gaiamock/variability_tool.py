@@ -22,6 +22,11 @@ class VariabilityTool:
         self.fchrom=fchrom
         self.relative_norm=relative_norm
 
+        self.average_g = 0. 
+        self.average_bp = 0.
+        self.average_rp = 0.
+        self.average_color = self.average_bp - self.average_rp
+
     def __call__(self, time):
         """
         Evaluate the variability model at given times.
