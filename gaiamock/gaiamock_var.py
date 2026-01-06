@@ -395,7 +395,7 @@ def check_9par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned=True):
     s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
     return F2, s, mu, sigma_mu
 
-def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.), data_release='dr3'):
+def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.), data_release='dr3',photometric_uncertainties=False):
     '''
     Thi s function takes a set of astrometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err) 
     and fits a VIMF (fixed variability-induced motion) solution. 
@@ -436,9 +436,19 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, varia
     Cinv = np.diag(1/ast_err**2)  #Errors 
 
     tbjd = get_jd_from_tast_yr(t_ast_yr, data_release=data_release)
-    dG = variability_tool.g_lcurve_normalised(tbjd) # magnitude difference from the mean magnitude at each epoch
-    flux_factor = 10**(0.4*dG) - 1
 
+    #Error treatment 
+    sigma_G = lambda G: 0 #placeholder function @TODO: implement a function to get G-band photometric uncertainties as a function of G magnitude and data release.
+    if photometric_uncertainties:
+        G     = variability_tool.g_lcurve_magnitude_errors(tbjd) # true G - <G>  
+        dGobs = G + sigma_G(G)*np.random.normal(0,1,len(G))  # Errors added to the magnitudes
+        dGobs = dGobs - np.mean(dGobs)  # rescale to mean zero, because the model is generated without errors, but we want to maitain the assumption that dG is rescaled to <G>  
+        flux_factor = 10**(0.4*dGobs) - 1
+    else:
+        dG = variability_tool.g_lcurve_normalised(tbjd) # magnitude difference from the mean magnitude at each epoch
+        flux_factor = 10**(0.4*dG) - 1  
+    
+    #Proceed with the first attempt 
     M = np.vstack([np.sin(psi),                 #alpha
                    t_ast_yr*np.sin(psi),        #mu_alpha
                    flux_factor*np.sin(psi),     #D_alpha
@@ -446,9 +456,24 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, varia
                    t_ast_yr*np.cos(psi),        #mu_delta
                    flux_factor*np.cos(psi),     #D_delta
                    plx_factor]).T               #parallax
+    
 
     mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
     Lambda_pred = np.dot(M, mu)
+
+    #If we are including photometric uncertainties, we should now re-calculate the astrometric uncertainties including the contribution from photometric uncertainties.
+    if photometric_uncertainties:
+        #@TODO: implement an iterative procedure to converge on the final solution.
+        D_alpha, D_delta = mu[2], mu[5]
+        sigma_mod = np.log(10)/2.5 * sigma_G( G ) *  flux_factor * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+        ast_err_updated = np.sqrt( ast_err**2 + sigma_mod**2)
+        Cinv = np.diag(1/ast_err_updated**2)  #Updated Errors
+        mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+        Lambda_pred = np.dot(M, mu)
+
+
+
+    ##Now residuals and statistic
     resids = ast_obs - Lambda_pred
     Nobs, nu, nu_unbinned = len(ast_obs), len(ast_obs) - 7, len(ast_obs)*8 - 7 #/ 7 parameters: ra, pmra, D_alpha, dec, pmdec, D_delta, plx
 
