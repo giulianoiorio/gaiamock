@@ -632,15 +632,21 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     '''
     
     t = get_gost_one_position(ra, dec, data_release=data_release)
-    
+
     # reject a random 10%
     if reject_10_percent:
         t = t[np.random.uniform(0, 1, len(t)) > 0.1]
     psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
     t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
     
+    #Consider the variability and obtain the true magnitudes at each epoch base don the model 
+    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
+    G_true = phot_g_mean_mag + G_magnitude_normalised  # instantaneous G magnitude at each epoch
+    
+    #GIU 07/01/25: now in case of a variable star the errors are etherostheteroskedastic and dependes on the true G
     N_ccd_avg = 8
-    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)/np.sqrt(N_ccd_avg)
+    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
     
     if phot_g_mean_mag < 13:
         extra_noise = np.random.uniform(0, 0.04)
@@ -665,11 +671,11 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     #this effect is indeed used to fit the so called "variability induced movers" (VIM) in Gaia DR3
     #(see Halbwachs+23 paper, Section 6 https://ui.adsabs.harvard.edu/abs/2023A%26A...674A...9H/abstract)
     # Considering that f=10**(G1-G2)/2.5, where G1 and G2 are the magnitudes of the two components (G1 is the brighter one),
-    # we can write the flux ratio including variability as:
+    # so if G1 is variable, we have G1(t) = <G1> + delta_G1(t) and f_new=10**((<G1> + delta_G1(t) - G2)/2.5) = f * 10**(delta_G1(t)/2.5)
+    # so we can write the flux ratio including variability as:
     # f_new = f * 10**(0.4*delta_G(t))
     # where delta_G(t)=G(t) - <G> and G(t) is the instantaneous magnitude of the system at time t
     # and <G> is the mean magnitude of the system (phot_g_mean_mag) used to estimate f 
-    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
     f_variable = f * 10**(0.4*G_magnitude_normalised)
 
     #Deal with possibile switch of primary (most luminous)/secondary due to variability
@@ -698,8 +704,11 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
         blending_noise = 0.5*np.random.randn(len(psi))
         blending_noise[np.abs(delta_eta) < 45] = 0 # 0 if \Delta \eta < resolution/2
         Lambda_pred += blending_noise
+
+    #Now estimate observed photometry 
+    G_pred = G_true + phot_epoch_err_per_transit * np.random.randn(len(psi))
     
-    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit*np.ones(len(Lambda_pred))
+    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit, G_pred, phot_epoch_err_per_transit
 
 
 def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, period, Tp, ecc, omega, inc, w, a0_mas, phot_g_mean_mag, data_release, c_funcs, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
@@ -1824,3 +1833,7 @@ def ln_flat_prior(theta, theta_bounds):
         return 0
     else: 
         return -np.inf
+
+
+if __name__ == '__main__':
+    print("ciao")
