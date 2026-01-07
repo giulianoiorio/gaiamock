@@ -451,7 +451,6 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err, binned
     now since F propto 10**(-G/2.5), we have sigma_F = sqrt( (d F /d G)^2 sigma_G^2) = sqrt(10**(-G/2.5) * -ln(10)/2.5 * sigma_G)^2 =  ln(10)/2.5 * F * sigma_G
     so sigma_mod = ln(10)/2.5 * F * sigma_G * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)| = ln(10)/2.5 * sigma_G * F_ref/F * |D_alpha*sin(psi) + D_delta*cos(psi)|
     but Fref/F = 10**(0.4*dG) = flux_factor + 1, so finally:   sigma_mod = ln(10)/2.5 * sigma_G * (flux_factor + 1) * |D_alpha*sin(psi) + D_delta*cos(psi)|
-
     '''
     Cinv = np.diag(1/ast_err**2)  #Errors 
 
@@ -1021,6 +1020,54 @@ def plot_residuals_7par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, theta_array
     ax[0].set_ylabel('residual (5 par)', fontsize=20)
     ax[1].set_ylabel('residual (7 par)', fontsize=20)
 
+def plot_residuals_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err, theta_array, c_funcs=None):
+    '''
+    this function takes a set of epoch astrometry (as described by t_ast_yr, psi, plx_factor, ast_obs, and ast_err), and a set of linear parameters for a VIMF solution, theta_array = (ra, pmra, Dra, dec, pmdec, Ddec, plx), and predicts the epoch astrometry. 
+    It also calculates the best-fit 5 parameter solution for the same astrometry. Finally, it plots the epoch astrometry residuals as a function of time for both solutions. 
+    '''
+    # 5 parameter solution
+    Cinv = np.diag(1/ast_err**2)    
+    M = np.vstack([np.sin(psi), t_ast_yr*np.sin(psi), np.cos(psi), t_ast_yr*np.cos(psi), plx_factor]).T 
+    mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs) #  ra, pmra, dec, pmdec, parallax
+    Lambda_pred = np.dot(M, mu)
+    
+    nrow, width, height_scale = 2, 6, 1
+    xlim = [np.min(t_ast_yr)-0.2, np.max(t_ast_yr)+0.2]
+    f, ax = plt.subplots(nrow, 1, figsize = (width, 1+3*nrow*height_scale))
+    plt.subplots_adjust(hspace = 0)
+    for i in range(nrow):
+        ax[i].set_xlim(xlim)
+        ax[i].tick_params(labelsize = 18)
+        if i != nrow - 1:
+            ax[i].set_xticklabels([])
+    ax[0].errorbar(t_ast_yr, ast_obs - Lambda_pred, yerr=ast_err, fmt='k.')
+    print('single star chi2: %.2f'  % (np.sum( (ast_obs - Lambda_pred)**2 / ast_err**2 )) )
+    
+    # VIMF  solution
+    dG_obs = G_obs - np.mean(G_obs)    # rescale to mean zero, because the model is generated without errors, but we want to maitain the assumption that dG is rescaled to <G>
+    flux_factor = 10**(0.4*dG_obs) - 1 #noisy flux factor from observed magnitudes with errors
+    D_alpha, D_delta = theta_array[2], theta_array[5]
+    sigma_mod = np.log(10)/2.5 * G_err * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+    ast_err_updated = np.sqrt( ast_err**2 + sigma_mod**2)
+            
+    #Proceed with the first attempt 
+    M = np.vstack([np.sin(psi),                 #alpha
+                   t_ast_yr*np.sin(psi),        #mu_alpha
+                   flux_factor*np.sin(psi),     #D_alpha
+                   np.cos(psi),                 #delta
+                   t_ast_yr*np.cos(psi),        #mu_delta
+                   flux_factor*np.cos(psi),     #D_delta
+                   plx_factor]).T               #parallax
+            
+    Lambda_pred = np.dot(M, theta_array)
+    resids = ast_obs - Lambda_pred
+    chi2 = np.sum(resids**2/ast_err_updated**2)
+ 
+    print('VIMF chi2: %.2f' % chi2 )
+    ax[1].errorbar(t_ast_yr, ast_obs - Lambda_pred, yerr=ast_err, fmt='k.')
+    ax[1].set_xlabel('time (years)', fontsize=20)
+    ax[0].set_ylabel('residual (5 par)', fontsize=20)
+    ax[1].set_ylabel('residual (VIMF)', fontsize=20)
     
 def get_uncertainties_at_best_fit_binary_solution(t_ast_yr, psi, plx_factor, ast_obs, ast_err, p0, c_funcs, binned=True, reject_outlier=False):
     '''
@@ -1118,7 +1165,7 @@ def fit_5par_solution_only(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned =
     return [mu[0], mu[1], mu[2], mu[3], mu[4], sigma_mu[0], sigma_mu[1], sigma_mu[2], sigma_mu[3], sigma_mu[4], ruwe, sigma5d_max]
         
 
-def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs, verbose=False, show_residuals=False, binned = True, ruwe_min = 1.4, skip_acceleration=False, reject_outlier=False, P_min = 10):
+def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err,  c_funcs, G_obs=None, G_err=None, verbose=False, show_residuals=False, binned = True, ruwe_min = 1.4, skip_acceleration=False, reject_outlier=False, P_min = 10):
     '''
     this function takes 1D astrometry and fits it with a cascade of astrometric models.  
     t_ast_yr, psi, plx_factor, ast_obs, ast_err: arrays of astrometric measurements and related metadata
@@ -1215,32 +1262,64 @@ def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_
         F2 = np.sqrt(9*nu/2)*(chi2_red_binned**(1/3) + 2/(9*nu) - 1)
     a0_over_err, parallax_over_error = a0_mas/sigma_a0_mas, plx/sig_parallax
     
-    if show_residuals:
-        plot_residuals(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, theta_array = res, c_funcs = c_funcs)
-    
-    if verbose: 
-        if F2 < 25:
-            print('goodness_of_fit (F2) is low enough to pass DR3 cuts! F2: %.1f' % F2)
-        else:
-            print('goodness_of_fit (F2) is too high to pass DR3 cuts! F2: %.1f' % F2)
+    ret_array_binary = [plx, sig_parallax, A, sig_A, B, sig_B, F, sig_F, G, sig_G, period, sig_period, phi_p, sig_phi_p, ecc, sig_ecc, inc_deg, a0_mas, sigma_a0_mas, N_visibility_periods, len(t_ast_yr), F2, ruwe]
 
-        if (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5):
-            print('a0_over_err is high enough to pass DR3 cuts! a0_over_err: %.1f' % a0_over_err)
-        else:
-            print('a0_over_err is NOT high enough to pass DR3 cuts! a0_over_err: %.1f' % a0_over_err)
-
-        if parallax_over_error > 20000/period:
-            print('parallax over error is high enough to pass DR3 cuts! parallax_over_error: %.1f' % parallax_over_error)
-        else:
-            print('parallax over error is NOT high enough to pass DR3 cuts! parallax_over_error: %.1f' % parallax_over_error)
-        if (sig_ecc < 0.079*np.log(period)-0.244):
-            print('eccentricity error is low enough to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
-        else:
-            print('eccentricity error is too high to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
+    if (F2<25) and (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5) and (parallax_over_error > 20000/period) and (sig_ecc < 0.079*np.log(period)-0.244):
     
-    # lots of stuff that can be useful to return
-    return_array = [plx, sig_parallax, A, sig_A, B, sig_B, F, sig_F, G, sig_G, period, sig_period, phi_p, sig_phi_p, ecc, sig_ecc, inc_deg, a0_mas, sigma_a0_mas, N_visibility_periods, len(t_ast_yr), F2, ruwe]
-    return return_array
+        if show_residuals:
+            plot_residuals(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, theta_array = res, c_funcs = c_funcs)
+        
+        if verbose: 
+            if F2 < 25:
+                print('goodness_of_fit (F2) is low enough to pass DR3 cuts! F2: %.1f' % F2)
+            else:
+                print('goodness_of_fit (F2) is too high to pass DR3 cuts! F2: %.1f' % F2)
+
+            if (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5):
+                print('a0_over_err is high enough to pass DR3 cuts! a0_over_err: %.1f' % a0_over_err)
+            else:
+                print('a0_over_err is NOT high enough to pass DR3 cuts! a0_over_err: %.1f' % a0_over_err)
+
+            if parallax_over_error > 20000/period:
+                print('parallax over error is high enough to pass DR3 cuts! parallax_over_error: %.1f' % parallax_over_error)
+            else:
+                print('parallax over error is NOT high enough to pass DR3 cuts! parallax_over_error: %.1f' % parallax_over_error)
+            if (sig_ecc < 0.079*np.log(period)-0.244):
+                print('eccentricity error is low enough to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
+            else:
+                print('eccentricity error is too high to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
+
+        return ret_array_binary
+    
+
+    #VIMF (last thing checked in the cascade)
+    if (G_obs is None) and (G_err is None):
+        return ret_array_binary #retrocompatibility, if not G provided just return ret_array_binary 
+    elif (G_obs is None):
+        raise ValueError("G_obs cannot be None if G_err is not None")
+    elif (G_err is None):
+        raise ValueError("G_err cannot be None if G_obs is not None")
+    else:
+        #Check prober VIMF
+        F2_vimf, s_vimf, mu_vimf, sigma_mu_vimf = check_VIMF(t_ast_yr,psi,plx_factor,ast_obs,ast_err,G_obs,G_err,binned=binned)
+        plx_over_errvimf = mu_vimf[-1]/sigma_mu_vimf[-1]
+        if (F2_vimf < 25) and (s_vimf > 12) and (plx_over_errvimf > 30):
+            res =  Nret*[-77] #77 for VIMF
+            res[1] = s_vimf
+            res[2], res[3] = mu[-1], sigma_mu[-1] # parallax
+            res[4], res[5] = mu[2], sigma_mu[2] # Dalfa
+            res[6], res[7] = mu[5], sigma_mu[5] # Ddec
+            res[8] = ruwe
+            res[9] = F2_vimf
+            
+            if verbose:
+                print('VIMF parameter solution accepted! Not trying anything else.')
+            if show_residuals:
+                plot_residuals_VIMF(t_ast_yr=t_ast_yr, psi=psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, G_obs=G_obs, G_err=G_err, theta_array=mu, c_funcs= c_funcs)
+            return res
+
+    # If VIMF fails return anyway the binary for retro-compatibility
+    return ret_array_binary
 
 
 def run_full_astrometric_cascade(ra, dec, 
