@@ -438,11 +438,10 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err, binned
     Nobs, nu, nu_unbinned = len(ast_obs), len(ast_obs) - 7, len(ast_obs)*8 - 7 #/ 7 parameters: ra, pmra, D_alpha, dec, pmdec, D_delta, plx
 
     #Estimate F2 (equation 1 in Halbwachs+23)
-    chi2_red_binned = np.sum(resids**2/ast_err_VIMF**2)/nu
-    chi2_red_unbinned = predict_reduced_chi2_unbinned_data(chi2_red_binned = chi2_red_binned, n_param = 7, N_points = Nobs, Nbin=8)
+    chi2_red= np.sum(resids**2/ast_err_VIMF**2)/nu
 
-    F2 = np.sqrt(9*nu/2)*(chi2_red_binned**(1/3) + 2/(9*nu) -1  )
-    cc = np.sqrt(chi2_red_binned/((1-2/(9*nu))**3 ))
+    F2 = np.sqrt(9*nu/2)*(chi2_red**(1/3) + 2/(9*nu) -1  )
+    cc = np.sqrt(chi2_red/((1-2/(9*nu))**3 ))
 
     #Estimate the significance, i.e. a statistic to quantify if the addition of two parameters is 
     #justified by the data (equation 3 in Halbwachs+23).
