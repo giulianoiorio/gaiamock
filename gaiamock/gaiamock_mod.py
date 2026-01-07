@@ -552,6 +552,13 @@ def predict_astrometry_luminous_binary(ra, dec,
     epoch_err_per_transit = get_realistic_epoch_astrometry_errors(ra, dec, phot_g_mean_mag)
     epoch_err_per_transit_expect = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)
 
+    #Consider the variability and obtain the true magnitudes at each epoch base don the model 
+    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
+    G_true = phot_g_mean_mag + G_magnitude_normalised  # instantaneous G magnitude at each epoch
+    
+    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    
 
 
     EE = solve_kepler_eqn_on_array(M = 2*np.pi/period * (t_ast_yr*365.25 - Tp), ecc = ecc, c_funcs = c_funcs)
@@ -567,7 +574,27 @@ def predict_astrometry_luminous_binary(ra, dec,
     
     x, y = B_pred*X + G_pred*Y, A_pred*X + F_pred*Y   
     delta_eta = (-y*cpsi - x*spsi) 
-    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f) for i in range(len(psi))])
+    #GI 05/01/2025: Now account for the effect of variability in the G-band
+    #the variability introduce a modulation of the flux ratio that affect the photocenter position
+    #this effect is indeed used to fit the so called "variability induced movers" (VIM) in Gaia DR3
+    #(see Halbwachs+23 paper, Section 6 https://ui.adsabs.harvard.edu/abs/2023A%26A...674A...9H/abstract)
+    # Considering that f=10**(G1-G2)/2.5, where G1 and G2 are the magnitudes of the two components (G1 is the brighter one),
+    # so if G1 is variable, we have G1(t) = <G1> + delta_G1(t) and f_new=10**((<G1> + delta_G1(t) - G2)/2.5) = f * 10**(delta_G1(t)/2.5)
+    # so we can write the flux ratio including variability as:
+    # f_new = f * 10**(0.4*delta_G(t))
+    # where delta_G(t)=G(t) - <G> and G(t) is the instantaneous magnitude of the system at time t
+    # and <G> is the mean magnitude of the system (phot_g_mean_mag) used to estimate f 
+    f_variable = f * 10**(0.4*G_magnitude_normalised)
+
+    #Deal with possibile switch of primary (most luminous)/secondary due to variability
+    #If f_variable>1, we have to switch primary and secondary so that f'=1/f
+    #and q'=1/q=m1/m2.
+    f_variable_final = np.where(f_variable<1,f_variable,1/f_variable) #if f>1
+    q_variable_final = np.where(f_variable<1,m2/m1,m1/m2)
+
+    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=q_variable_final[i], f=f_variable_final[i]) for i in range(len(psi))])
+
+
     Lambda_com = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor # barycenter motion
     Lambda_pred = Lambda_com + bias # binary motion
 
@@ -1377,11 +1404,15 @@ def predict_astrometry_single_source(ra, dec,
     # reject a random 10%
     t = t[np.random.uniform(0, 1, len(t)) > 0.1]
     psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
-    
     t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
 
-    epoch_err_per_transit = get_realistic_epoch_astrometry_errors(ra, dec, phot_g_mean_mag)
-    epoch_err_per_transit_expect = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)
+    #Consider the variability and obtain the true magnitudes at each epoch base don the model 
+    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
+    G_true = phot_g_mean_mag + G_magnitude_normalised  # instantaneous G magnitude at each epoch
+    
+
+    epoch_err_per_transit = get_realistic_epoch_astrometry_errors(ra, dec, G_true)
+    epoch_err_per_transit_expect = al_uncertainty_per_ccd_interp(G = G_true)
 
     Lambda_pred = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor 
 
