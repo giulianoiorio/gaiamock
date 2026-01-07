@@ -32,6 +32,14 @@ def al_uncertainty_per_ccd_interp(G):
     sigma_eta = [0.4, 0.35, 0.15, 0.17, 0.23, 0.13,0.13, 0.135, 0.125, 0.13, 0.15, 0.23, 0.36, 0.63, 1.05, 2.05, 4.1]
     return np.interp(G, G_vals, sigma_eta)
 
+def photometric_uncertainty_per_ccd_interp(G):
+    '''
+    This gives the photometric uncertainty *per CCD* (not per FOV transit) as an interpolation 
+    of values obtained with the tool provided by Gaia for the EDR3 uncertanties (https://www.cosmos.esa.int/web/gaia/fitted-dr3-photometric-uncertainties-tool)
+    '''    
+    G_vals     = [4,5, 6,  6.5,   7, 7.5, 8.,8.5, 9, 9.5, 10, 10.3, 10.7, 11,  11.3, 11.8,   12.5,    13, 13.5,  14,  15,   16,   17,   18,   19,  20]
+    sigma_phot = [0.02,0.013,0.005,0.003,0.003,0.003,0.004,0.004,0.003,0.003,0.003,0.004,0.003,0.003,0.005,0.003,0.004,0.004,0.003,0.004,0.005,0.008,0.014,0.024,0.044,0.085]
+    return np.interp(G, G_vals, sigma_phot)
 
 def read_in_C_functions():
     '''
@@ -228,7 +236,6 @@ def solve_kepler_eqn_on_array(M, ecc, c_funcs, xtol = 1e-10):
 
     return results_array
 
-#@TODO added binned=True (even if not used) to be consistent with gaiamock
 def check_ruwe(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True):
     '''
     This function takes a set of astrometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err) and fits a 5-parameter solution. It inflates the uncertainties according to the goodness of fit and returns the 5-parameter UWE, best-fit parameters, and uncertainties. 
@@ -281,7 +288,6 @@ def get_5par_solution_and_sigma_5d_max(t_ast_yr, psi, plx_factor, ast_obs, ast_e
     
     return ruwe, mu, sigma_mu, sigma5d_max
 
-#@TODO added binned=True (even if not used)  to be consistent with gaiamock
 def check_7par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True):
     '''
     This function takes a set of astrometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err) and fits a 7-parameter acceleration solution. It inflates the uncertainties according to the goodness of fit and returns the best-fit parameters and uncertainties and F2 and significance associated with the solution. 
@@ -307,7 +313,7 @@ def check_7par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True):
     s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
     return F2, s, mu, sigma_mu
  
-#@TODO added binned=True (even if not used)  to be consistent with gaiamock
+
 def check_9par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned=True):
     '''
     This function takes a set of astrometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err) and fits a 9-parameter acceleration solution. It inflates the uncertainties according to the goodness of fit and returns the best-fit parameters and uncertainties and F2 and significance associated with the solution. 
@@ -334,6 +340,126 @@ def check_9par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned=True):
     s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
     return F2, s, mu, sigma_mu
 
+def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err, binned = True):
+    '''
+    This function takes a set of astrometric and photometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err)
+    and fits a VIMF (fixed variability-induced motion) solution. 
+    The fixed VIMF model assumes that the orbital motion of the components relative to their barycenter is negligible during the Gaia mission.
+    The parameters are the same of the 5-par solution (ra, pmra, dec, pmdec, plx) plus
+    2 parameters describing the direction and amplitude of the VIM effect.
+    The model is described in detail in  Halbwachs+23 (Sec. 6, https://www.aanda.org/articles/aa/pdf/2023/06/aa43969-22.pdf).
+    The final shift is  
+    delta_AL_VIM = delta_AL_5par +  D_alpha*(<F>/F-1)*sin(psi) * D_delta*(<F>/F-1)*cos(psi)
+    where D_alpha and D_delta are the two VIMF parameters to be fitted, <F> is the mean flux, and F is the instantaneous flux.
+    While delta_AL_5par is the standard 5-parameter astrometric model: (alpha + mu_alpha*t) * sin(psi) + (delta + mu_delta*t)*cos(psi) + parallax_factor*plx. 
+
+    Now the ratio <F>/F can be written in terms of magnitudes as:
+    <F>/F = 10**(0.4*(m - <m>))
+    where m is the instantaneous magnitude, and <m> is the mean magnitude.
+    If we use as usual a rescaled magnitude difference dm = m - <m>, we have:
+    <F>/F - 1 = 10**(0.4*dm) - 1, 
+
+    So rearring the equation for delta_AL_VIM to be consisent with the standard linear  model, we have:
+    delta_AL_VIM = [alpha + mu_alpha*t + D_alpha*(10**(0.4*dm) - 1)] * sin(psi) +
+                   [delta + mu_delta*t + D_delta*(10**(0.4*dm) - 1)] * cos(psi) +
+                   parallax_factor*plx
+
+    The function requires a variability_tool object from variability_tool.py to calculate dm at each epoch.
+    It also requires the data_release to calculate the correct times (t_ast_yr) from
+    the observation times in JD.
+
+    It inflates the uncertainties according to the goodness of fit and returns the best-fit parameters and uncertainties and F2 and significance associated with the solution.
+    The vector of best-fit parameters is:
+    mu = [ra, pmra, D_alpha, dec, pmdec, D_delta, plx], accordingly the errors are
+    sigma_mu = [sigma_ra, sigma_pmra, sigma_D_alpha, sigma_dec, sigma_pmdec, sigma_D_delta, sigma_plx]
+
+
+    ##Dealing with photometric uncertainties:
+    If photometric_uncertainties=True, the function adds random Gaussian errors to the magnitudes at each epoch according to the G-band photometric uncertainties.
+    Then it implements an iterative procedure to re-calculate the astrometric uncertainties including the contribution from photometric uncertainties,
+    and re-fits the VIMF model until convergence is reached (or a maximum of 5 iterations).
+    This is important because the photometric uncertainties propagate into the astrometric model via the VIMF terms.
+    From Halbwachs+23, Eq. 19 the final astrometric uncertainties including the contribution from photometric uncertainties are:
+    sigma_total = sqrt( sigma_astrometry^2 + sigma_mod^2 )
+    where sigma_astrometry are the original astrometric uncertainties (ast_err), and sigma_mod is the contribution from photometric uncertainties.
+    From Halbwachs+23 Eq. 18: sigma_mod = sigma_F * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    now since F propto 10**(-G/2.5), we have sigma_F = sqrt( (d F /d G)^2 sigma_G^2) = sqrt(10**(-G/2.5) * -ln(10)/2.5 * sigma_G)^2 =  ln(10)/2.5 * F * sigma_G
+    so sigma_mod = ln(10)/2.5 * F * sigma_G * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)| = ln(10)/2.5 * sigma_G * F_ref/F * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    but Fref/F = 10**(0.4*dG) = flux_factor + 1, so finally:   sigma_mod = ln(10)/2.5 * sigma_G * (flux_factor + 1) * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    '''
+    Cinv = np.diag(1/ast_err**2)  #Errors 
+
+    dG_obs = G_obs - np.mean(G_obs)    # rescale to mean zero, because the model is generated without errors, but we want to maitain the assumption that dG is rescaled to <G>
+    flux_factor = 10**(0.4*dG_obs) - 1 #noisy flux factor from observed magnitudes with errors
+    
+    #Proceed with the first attempt 
+    M = np.vstack([np.sin(psi),                 #alpha
+                   t_ast_yr*np.sin(psi),        #mu_alpha
+                   flux_factor*np.sin(psi),     #D_alpha
+                   np.cos(psi),                 #delta
+                   t_ast_yr*np.cos(psi),        #mu_delta
+                   flux_factor*np.cos(psi),     #D_delta
+                   plx_factor]).T               #parallax
+    
+
+    #First run without photometric uncertainties
+    mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+    Lambda_pred = np.dot(M, mu)
+
+    #Estimate the effect of photometric uncertanties. 
+    #From Halbwachs+23, Eq. 18: sigma_mod = sigma_F * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    #now since F propto 10**(-G/2.5), we have sigma_F = sqrt( (d F /d G)^2 sigma_G^2) = sqrt(10**(-G/2.5) * -ln(10)/2.5 * sigma_G)^2 =  ln(10)/2.5 * F * sigma_G
+    #so sigma_mod = ln(10)/2.5 * F * sigma_G * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)| = ln(10)/2.5 * sigma_G * F_ref/F * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    #but Fref/F = 10**(0.4*dG) = flux_factor + 1, so finally:   sigma_mod = ln(10)/2.5 * sigma_G * (flux_factor + 1) * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    D_alpha, D_delta = mu[2], mu[5]
+    sigma_mod = np.log(10)/2.5 * G_err * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+
+    #Now check if sigma_mod is negligible compared to astrometric uncertainties, just accept this solution 
+    #otherwise start an iterative procedure to re-calculate the astrometric uncertainties including the contribution from photometric uncertainties.
+    # We consider sigma_mod negligible if it is less than 1% of astrometric uncertainties (consider all the elements, since the errors are now per-epoch).
+    if np.any(sigma_mod > 0.01*ast_err):
+        D_alpha_old, D_delta_old, iteration = D_alpha*100, D_delta*100, 0
+        #Start iterative procedure considering a relative change of 1% in D_alpha and D_delta as convergence criterion or a maximum of 5 iterations
+        while (np.abs(D_alpha - D_alpha_old)/np.abs(D_alpha_old) > 1e-2 or np.abs(D_delta - D_delta_old)/np.abs(D_delta_old) > 1e-2) and iteration < 5:
+            D_alpha_old, D_delta_old = D_alpha, D_delta
+            ast_err_updated = np.sqrt( ast_err**2 + sigma_mod**2)
+            Cinv = np.diag(1/ast_err_updated**2)  #Updated Errors
+            mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+            Lambda_pred = np.dot(M, mu)
+            D_alpha, D_delta = mu[2], mu[5]
+            sigma_mod = np.log(10)/2.5 * G_err * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+            iteration += 1  
+        ast_err_VIMF = ast_err_updated
+    else:
+        ast_err_VIMF = ast_err
+
+    ##Now residuals and statistic
+    resids = ast_obs - Lambda_pred
+    Nobs, nu, nu_unbinned = len(ast_obs), len(ast_obs) - 7, len(ast_obs)*8 - 7 #/ 7 parameters: ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+
+    #Estimate F2 (equation 1 in Halbwachs+23)
+    chi2_red_binned = np.sum(resids**2/ast_err_VIMF**2)/nu
+    chi2_red_unbinned = predict_reduced_chi2_unbinned_data(chi2_red_binned = chi2_red_binned, n_param = 7, N_points = Nobs, Nbin=8)
+
+    F2 = np.sqrt(9*nu/2)*(chi2_red_binned**(1/3) + 2/(9*nu) -1  )
+    cc = np.sqrt(chi2_red_binned/((1-2/(9*nu))**3 ))
+
+    #Estimate the significance, i.e. a statistic to quantify if the addition of two parameters is 
+    #justified by the data (equation 3 in Halbwachs+23).
+    #In this case the two additional parameters are D_alpha and D_delta (indices 2 and 5 in the mu vector)
+    cov_matrix = np.linalg.inv(M.T @ Cinv @ M)
+    sigma_mu = cc*np.sqrt(np.diag(cov_matrix))
+    cov25 = cov_matrix[2][5]*cc**2
+    
+    p1, p2, sig1, sig2 = mu[2], mu[5], sigma_mu[2], sigma_mu[5]
+    rho12 = cov25/(sig1*sig2)
+    s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
+    
+    #F2 is goodness of fit statistic (Eq. 1 in Halbwachs+23)
+    #s is significance of the VIMF solution (Eq. 3 in Halbwachs+23)
+    #mu is the best-fit parameters vector: [ra, pmra, D_alpha, dec, pmdec, D_delta, plx]
+    #sigma_mu is the uncertainties vector: [sigma_ra, sigma_pmra, sigma_D_alpha, sigma_dec, sigma_pmdec, sigma_D_delta, sigma_plx]
+    return F2, s, mu, sigma_mu
 
 def al_bias_binary(delta_eta, q, f, u = 90):
     '''
