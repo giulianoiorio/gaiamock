@@ -405,9 +405,9 @@ def check_9par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned=True):
     s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
     return F2, s, mu, sigma_mu
 
-def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.), data_release='dr3',photometric_uncertainties=False):
+def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err, binned = True):
     '''
-    Thi s function takes a set of astrometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err) 
+    This function takes a set of astrometric and photometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err)
     and fits a VIMF (fixed variability-induced motion) solution. 
     The fixed VIMF model assumes that the orbital motion of the components relative to their barycenter is negligible during the Gaia mission.
     The parameters are the same of the 5-par solution (ra, pmra, dec, pmdec, plx) plus
@@ -451,29 +451,12 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, varia
     now since F propto 10**(-G/2.5), we have sigma_F = sqrt( (d F /d G)^2 sigma_G^2) = sqrt(10**(-G/2.5) * -ln(10)/2.5 * sigma_G)^2 =  ln(10)/2.5 * F * sigma_G
     so sigma_mod = ln(10)/2.5 * F * sigma_G * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)| = ln(10)/2.5 * sigma_G * F_ref/F * |D_alpha*sin(psi) + D_delta*cos(psi)|
     but Fref/F = 10**(0.4*dG) = flux_factor + 1, so finally:   sigma_mod = ln(10)/2.5 * sigma_G * (flux_factor + 1) * |D_alpha*sin(psi) + D_delta*cos(psi)|
-    
-    ### Photometric uncertainties derivation:
-    Following https://www.cosmos.esa.int/web/gaia/science-performance
-    The G-band photometric uncertainty per CCD observation is given by:
-    sigma_G_ccd = 1.2e-3 * sqrt(0.04895*10**(0.4*(G-15)) + 1.8633*10**(0.8*(G-15)) + 0.0001985*10**(1.2*(G-15)))
-    The uncertainty per FoV transit (8 CCDs) is then:
-    sigma_G_fov = sigma_G_ccd / sqrt(8)     
+
     '''
     Cinv = np.diag(1/ast_err**2)  #Errors 
 
-    tbjd = get_jd_from_tast_yr(t_ast_yr, data_release=data_release)
-
-    #Error treatment 
-    sigma_G = lambda G: 0 #placeholder function @TODO: implement a function to get G-band photometric uncertainties as a function of G magnitude and data release.
-    G     = variability_tool.average_g + variability_tool.g_lcurve_normalised(tbjd) # true G - <G>  
-    Gerr  = sigma_G(G)  # photometric uncertainties at each epoch
-    if photometric_uncertainties:
-        Gobs = G + Gerr*np.random.normal(0,1,len(G))  # Errors added to the magnitudes
-        dGobs = Gobs - np.mean(Gobs)  # rescale to mean zero, because the model is generated without errors, but we want to maitain the assumption that dG is rescaled to <G>  
-        flux_factor = 10**(0.4*dGobs) - 1
-    else:
-        dG = variability_tool.g_lcurve_normalised(tbjd) # magnitude difference from the mean magnitude at each epoch
-        flux_factor = 10**(0.4*dG) - 1  
+    dG_obs = G_obs - np.mean(G_obs)    # rescale to mean zero, because the model is generated without errors, but we want to maitain the assumption that dG is rescaled to <G>
+    flux_factor = 10**(0.4*dG_obs) - 1 #noisy flux factor from observed magnitudes with errors
     
     #Proceed with the first attempt 
     M = np.vstack([np.sin(psi),                 #alpha
@@ -485,32 +468,36 @@ def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned = True, varia
                    plx_factor]).T               #parallax
     
 
+    #First run without photometric uncertainties
     mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
     Lambda_pred = np.dot(M, mu)
 
-    #If we are including photometric uncertainties, we should now re-calculate the astrometric uncertainties including the contribution from photometric uncertainties.
-    #In this case the updated errors must be used to estimate the F2 statisc 
+    #Estimate the effect of photometric uncertanties. 
     #From Halbwachs+23, Eq. 18: sigma_mod = sigma_F * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)|
     #now since F propto 10**(-G/2.5), we have sigma_F = sqrt( (d F /d G)^2 sigma_G^2) = sqrt(10**(-G/2.5) * -ln(10)/2.5 * sigma_G)^2 =  ln(10)/2.5 * F * sigma_G
     #so sigma_mod = ln(10)/2.5 * F * sigma_G * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)| = ln(10)/2.5 * sigma_G * F_ref/F * |D_alpha*sin(psi) + D_delta*cos(psi)|
     #but Fref/F = 10**(0.4*dG) = flux_factor + 1, so finally:   sigma_mod = ln(10)/2.5 * sigma_G * (flux_factor + 1) * |D_alpha*sin(psi) + D_delta*cos(psi)|
-    if photometric_uncertainties:
-        D_alpha, D_delta = mu[2], mu[5]
-        D_alpha_old, D_delta_old, iteration = D_alpha*100, D_delta, 0
-        while (np.abs(D_alpha - D_alpha_old)/np.abs(D_alpha_old) > 1e-3 or np.abs(D_delta - D_delta_old)/np.abs(D_delta_old) > 1e-3) and iteration < 5:
+    D_alpha, D_delta = mu[2], mu[5]
+    sigma_mod = np.log(10)/2.5 * G_err * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+
+    #Now check if sigma_mod is negligible compared to astrometric uncertainties, just accept this solution 
+    #otherwise start an iterative procedure to re-calculate the astrometric uncertainties including the contribution from photometric uncertainties.
+    # We consider sigma_mod negligible if it is less than 1% of astrometric uncertainties (consider all the elements, since the errors are now per-epoch).
+    if np.any(sigma_mod > 0.01*ast_err):
+        D_alpha_old, D_delta_old, iteration = D_alpha*100, D_delta*100, 0
+        #Start iterative procedure considering a relative change of 1% in D_alpha and D_delta as convergence criterion or a maximum of 5 iterations
+        while (np.abs(D_alpha - D_alpha_old)/np.abs(D_alpha_old) > 1e-2 or np.abs(D_delta - D_delta_old)/np.abs(D_delta_old) > 1e-2) and iteration < 5:
             D_alpha_old, D_delta_old = D_alpha, D_delta
-            sigma_mod = np.log(10)/2.5 * Gerr * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
             ast_err_updated = np.sqrt( ast_err**2 + sigma_mod**2)
             Cinv = np.diag(1/ast_err_updated**2)  #Updated Errors
             mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
             Lambda_pred = np.dot(M, mu)
             D_alpha, D_delta = mu[2], mu[5]
+            sigma_mod = np.log(10)/2.5 * G_err * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
             iteration += 1  
         ast_err_VIMF = ast_err_updated
     else:
         ast_err_VIMF = ast_err
-    
-    
 
     ##Now residuals and statistic
     resids = ast_obs - Lambda_pred
