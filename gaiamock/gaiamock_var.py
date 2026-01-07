@@ -1291,7 +1291,7 @@ def run_full_astrometric_cascade(ra, dec,
     if c_funcs is None:
         c_funcs = read_in_C_functions()
 
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
                                                                                      parallax = parallax, pmra = pmra, pmdec = pmdec, 
                                                                                      m1 = m1, m2 = m2, 
                                                                                      period = period, Tp = Tp, ecc = ecc, 
@@ -1311,7 +1311,7 @@ def run_full_astrometric_cascade(ra, dec,
     
     # potentially blended, so rerun 
     if (period > 1e4) and (res[-2] < 25) & (res[-6]/res[-5] > 5): 
-        t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, 
+        t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err  = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, 
                                                                                          m1 = m1, m2 = m2, period = period, Tp = Tp, ecc = ecc, 
                                                                                          omega = omega, inc = inc_deg*np.pi/180, w=w, 
                                                                                          phot_g_mean_mag = phot_g_mean_mag, f=f, data_release=data_release, 
@@ -1355,7 +1355,7 @@ def run_only_5par_solution(ra, dec,
     if c_funcs is None:
         c_funcs = read_in_C_functions()
 
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
                                                                                      parallax = parallax, pmra = pmra, pmdec = pmdec, 
                                                                                      m1 = m1, m2 = m2, period = period, 
                                                                                      Tp = Tp, ecc = ecc, omega = omega, 
