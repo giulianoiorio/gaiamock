@@ -224,6 +224,7 @@ The VIMF model is checked only if the full binary solution is not accepted. Then
 - $\frac{\omega}{\sigma_\omega}>30$ (parallax over parallax error)
 
 **Note** In  [Halbwachs+23](http://arxiv.org/abs/2206.05726), the condition $s>12$ is used just as a pre-condition to accept the solution, but then no solutions with $s<20$ are included in the final catalogue
+We still use 12 to be consistent with the rest of the astrometric cascade (also the acceleration and variable acceleration are treated in the same way in Gaia, but in *gaiamock* a threshould of 12 is used).
 
 ## Chromaticity effect
 
