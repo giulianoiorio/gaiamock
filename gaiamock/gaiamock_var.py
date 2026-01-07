@@ -1264,30 +1264,32 @@ def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err,  c
     
     ret_array_binary = [plx, sig_parallax, A, sig_A, B, sig_B, F, sig_F, G, sig_G, period, sig_period, phi_p, sig_phi_p, ecc, sig_ecc, inc_deg, a0_mas, sigma_a0_mas, N_visibility_periods, len(t_ast_yr), F2, ruwe]
 
+    if verbose: 
+        if F2 < 25:
+            print('goodness_of_fit (F2) is low enough to pass DR3 cuts! F2: %.1f' % F2)
+        else:
+            print('goodness_of_fit (F2) is too high to pass DR3 cuts! F2: %.1f' % F2)
+
+        if (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5):
+            print('a0_over_err is high enough to pass DR3 cuts! a0_over_err: %.1f' % a0_over_err)
+        else:
+            print('a0_over_err is NOT high enough to pass DR3 cuts! a0_over_err: %.1f' % a0_over_err)
+
+        if parallax_over_error > 20000/period:
+            print('parallax over error is high enough to pass DR3 cuts! parallax_over_error: %.1f' % parallax_over_error)
+        else:
+            print('parallax over error is NOT high enough to pass DR3 cuts! parallax_over_error: %.1f' % parallax_over_error)
+        if (sig_ecc < 0.079*np.log(period)-0.244):
+            print('eccentricity error is low enough to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
+        else:
+            print('eccentricity error is too high to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
+
+
     if (F2<25) and (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5) and (parallax_over_error > 20000/period) and (sig_ecc < 0.079*np.log(period)-0.244):
     
         if show_residuals:
             plot_residuals(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, theta_array = res, c_funcs = c_funcs)
         
-        if verbose: 
-            if F2 < 25:
-                print('goodness_of_fit (F2) is low enough to pass DR3 cuts! F2: %.1f' % F2)
-            else:
-                print('goodness_of_fit (F2) is too high to pass DR3 cuts! F2: %.1f' % F2)
-
-            if (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5):
-                print('a0_over_err is high enough to pass DR3 cuts! a0_over_err: %.1f' % a0_over_err)
-            else:
-                print('a0_over_err is NOT high enough to pass DR3 cuts! a0_over_err: %.1f' % a0_over_err)
-
-            if parallax_over_error > 20000/period:
-                print('parallax over error is high enough to pass DR3 cuts! parallax_over_error: %.1f' % parallax_over_error)
-            else:
-                print('parallax over error is NOT high enough to pass DR3 cuts! parallax_over_error: %.1f' % parallax_over_error)
-            if (sig_ecc < 0.079*np.log(period)-0.244):
-                print('eccentricity error is low enough to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
-            else:
-                print('eccentricity error is too high to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
 
         return ret_array_binary
     
@@ -1373,7 +1375,7 @@ def run_full_astrometric_cascade(ra, dec,
             print('not enough visibility periods!')
         return Nret*[0]
         
-    res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min,skip_acceleration=skip_acceleration ) 
+    res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err , c_funcs = c_funcs,  G_obs=G_obs, G_err=G_err, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min,skip_acceleration=skip_acceleration ) 
     
     # potentially blended, so rerun 
     if (period > 1e4) and (res[-2] < 25) & (res[-6]/res[-5] > 5): 
@@ -1388,7 +1390,7 @@ def run_full_astrometric_cascade(ra, dec,
             if verbose:
                 print('not enough visibility periods!')
             return Nret*[0]
-        res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min, skip_acceleration=skip_acceleration) 
+        res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs,   G_obs=G_obs, G_err=G_err, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min, skip_acceleration=skip_acceleration) 
 
     return res
     
