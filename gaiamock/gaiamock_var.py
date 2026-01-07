@@ -607,7 +607,61 @@ def get_jd_from_tast_yr(t_ast_yr, data_release):
     else: 
         raise ValueError('invalid data_release!')
     return jd
+
+def predict_astrometry_single_source(ra, dec, 
+                                     parallax, pmra, pmdec, 
+                                     phot_g_mean_mag, 
+                                     data_release, c_funcs=None, 
+                                     variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
+    '''
+    this function predicts the epoch-level astrometry for single source. 
+    ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
+    parallax (mas): the true parallax (i.e., 1/d)
+    pmra, pmdec: true proper motions in mas/yr
+    phot_g_mean_mag: G-band magnitude
+    c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
+    '''
     
+    t = get_gost_one_position(ra, dec, data_release=data_release)
+    
+    # reject a random 10%
+    t = t[np.random.uniform(0, 1, len(t)) > 0.1]
+    psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
+    t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
+
+    #Consider the variability and obtain the true magnitudes at each epoch base don the model 
+    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
+    G_true = phot_g_mean_mag + G_magnitude_normalised  # instantaneous G magnitude at each epoch
+    
+    #GIU 07/01/25: now in case of a variable star the errors are etherostheteroskedastic and dependes on the true G
+    N_ccd_avg = 8
+    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    
+    if phot_g_mean_mag < 13:
+        extra_noise = np.random.uniform(0, 0.04)
+    else: 
+        extra_noise = 0
+    
+    Lambda_pred = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor 
+
+    #Add chromaticity effect due to color variability
+    colors = variability_tool(jds)
+    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+                                          fchrom=variability_tool.fchrom, 
+                                          relative_norm=variability_tool.relative_norm)
+    Lambda_pred += Lambda_chromatic
+
+    Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
+    Lambda_pred += extra_noise*np.random.randn(len(psi)) # unmodeled noise
+
+    #Now estimate observed photometry 
+    G_pred = G_true + phot_epoch_err_per_transit * np.random.randn(len(psi))
+
+    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit, G_pred, phot_epoch_err_per_transit
+
+
 def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc, w, phot_g_mean_mag, f, data_release, c_funcs, do_blending_noise = False, reject_10_percent = True, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function predicts the epoch-level astrometry for a binary as it would be observed by Gaia. 
@@ -1544,51 +1598,6 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     
     return Lambda_pred, rv_pred
     
-def predict_astrometry_single_source(ra, dec, 
-                                     parallax, pmra, pmdec, 
-                                     phot_g_mean_mag, 
-                                     data_release, c_funcs=None, 
-                                     variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
-    '''
-    this function predicts the epoch-level astrometry for single source. 
-    ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
-    parallax (mas): the true parallax (i.e., 1/d)
-    pmra, pmdec: true proper motions in mas/yr
-    phot_g_mean_mag: G-band magnitude
-    f: flux ratio, F2/F1, in the G-band. 
-    c_funcs: from read_in_C_functions()
-    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
-    '''
-    
-    t = get_gost_one_position(ra, dec, data_release=data_release)
-    
-    # reject a random 10%
-    t = t[np.random.uniform(0, 1, len(t)) > 0.1]
-    psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
-    
-    t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
-
-    N_ccd_avg = 8
-    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)/np.sqrt(N_ccd_avg)
-    
-    if phot_g_mean_mag < 13:
-        extra_noise = np.random.uniform(0, 0.04)
-    else: 
-        extra_noise = 0
-    
-    Lambda_pred = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor 
-
-    #Add chromaticity effect due to color variability
-    colors = variability_tool(jds)
-    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
-                                          fchrom=variability_tool.fchrom, 
-                                          relative_norm=variability_tool.relative_norm)
-    Lambda_pred += Lambda_chromatic
-
-    Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
-    Lambda_pred += extra_noise*np.random.randn(len(psi)) # unmodeled noise
-
-    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit*np.ones(len(Lambda_pred))
 
  
 def photocenter_orbit_2d_from_thiele_innes(t_ast_yr, parallax, period, ecc, Tp, A, B, F, G,c_funcs):
