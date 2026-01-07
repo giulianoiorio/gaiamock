@@ -738,8 +738,14 @@ def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, per
     psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
     t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
     
+    #Consider the variability and obtain the true magnitudes at each epoch base don the model 
+    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
+    G_true = phot_g_mean_mag + G_magnitude_normalised  # instantaneous G magnitude at each epoch
+
+    #GIU 07/01/25: now in case of a variable star the errors are etherostheteroskedastic and dependes on the true G
     N_ccd_avg = 8
-    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)/np.sqrt(N_ccd_avg)
+    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
     
     if phot_g_mean_mag < 13:
         extra_noise = np.random.uniform(0, 0.04)
@@ -773,7 +779,10 @@ def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, per
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
     Lambda_pred += extra_noise*np.random.randn(len(psi)) # unmodeled noise
     
-    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit*np.ones(len(Lambda_pred))
+    #Now estimate observed photometry 
+    G_pred = G_true + phot_epoch_err_per_transit * np.random.randn(len(psi))
+
+    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit, G_pred, phot_epoch_err_per_transit
  
 def get_realistic_epoch_astrometry_errors(ra, dec, phot_g_mean_mag):
     '''
