@@ -117,20 +117,17 @@ by simply estimating the flux luminosity at each scanning time, rather than usin
 
 The flux luminosity is defined such as (see [El-Badry+24](https://ui.adsabs.harvard.edu/abs/2024OJAp....7E.100E/abstract))
 
-$$
-f =  \frac{L_2}{L_1} = 10^{-\frac{G_2 -G_1}{2.5}} =  10^{\frac{G_1 -G_2}{2.5}}, 
-$$
+$$f =  \frac{L_2}{L_1} = 10^{-\frac{G_2 -G_1}{2.5}} =  10^{\frac{G_1 -G_2}{2.5}}, $$
+
 where the subscript 1 refers to the most luminous star, so that we have always $0 \leq f \leq1$. 
 If one of the two stars (let's assume the most luminous one) is a variable star, the current  version of Gaiamock uses the average G-band magnitude, so
-$$
-f  = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}}, 
-$$. 
+
+$$f  = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}}$$. 
 
 The true flux ratio will be instead 
-$$
-f_\mathrm{var}(t) = 10^{\frac{G_1(t) -G_2}{2.5}} = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}} 10^{\frac{G_1(t) - \langle G_1 \rangle}{2.5}} =  
-f 10^{\frac{d G_1(t)}{2.5}}
-$$
+
+$$f_\mathrm{var}(t) = 10^{\frac{G_1(t) -G_2}{2.5}} = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}} 10^{\frac{G_1(t) - \langle G_1 \rangle}{2.5}} =  
+f 10^{\frac{d G_1(t)}{2.5}}$$
 
 So the final time dependent flux ratio is equal to the standard averaged one times a correction that depends of the magnitude variation rescaled to have mean magnitude 0. 
 In case of large photometric variations and/or stars with similar magnitude, the role of the primary and secondary can switch. 
@@ -163,23 +160,15 @@ $$\frac{\bar{F_G}}{F_G(t)} = 10^\frac{G_\mathrm{obs}(t)-G_\mathrm{mean}}{2.5} $$
 
 In this case however, the data errors are not only dependent on the astrometric error but also on the photometric error. Hence the final error is
 
-$$
-\sigma(t) = \sqrt{\sigma^2_\eta(t) + \sigma^2_\mathrm{mod}(t)}, 
-$$
+$$\sigma(t) = \sqrt{\sigma^2_\eta(t) + \sigma^2_\mathrm{mod}(t)}, $$
 where from the propagation of errors 
-$$
-\sigma_\mathrm{mod} = \sigma_\mathrm{F} \frac{\bar{F_G}}{F^2_G(t)} | D_\alpha \sin (\psi)  + D_\delta \cos (\psi) |, 
-$$
+$$\sigma_\mathrm{mod} = \sigma_\mathrm{F} \frac{\bar{F_G}}{F^2_G(t)} | D_\alpha \sin (\psi)  + D_\delta \cos (\psi) |,$$
 
 same for the propagation of errors we can write
 
-$$
-\sigma_F = \frac{\ln 10}{2.5} * \sigma_G * 10**(-G/2.5)= \frac{\ln 10}{2.5}  \sigma_G  10^{-G/2.5}=  \frac{\ln 10}{2.5} \sigma_G  F
-$$, so
+$$\sigma_F = \frac{\ln 10}{2.5} * \sigma_G * 10**(-G/2.5)= \frac{\ln 10}{2.5}  \sigma_G  10^{-G/2.5}=  \frac{\ln 10}{2.5} \sigma_G  F$$, so
 
-$$
-\sigma_\mathrm{mod} = \frac{\ln 10}{2.5} \sigma_\mathrm{G} \frac{\bar{F_G}}{F_G(t)} | D_\alpha \sin (\psi)  + D_\delta \cos (\psi) | = \frac{\ln 10}{2.5} \sigma_\mathrm{G} 10^\frac{G_\mathrm{obs}(t)-G_\mathrm{mean}}{2.5} | D_\alpha \sin (\psi)  + D_\delta \cos (\psi) | , 
-$$. 
+$$\sigma_\mathrm{mod} = \frac{\ln 10}{2.5} \sigma_\mathrm{G} \frac{\bar{F_G}}{F_G(t)} | D_\alpha \sin (\psi)  + D_\delta \cos (\psi) | = \frac{\ln 10}{2.5} \sigma_\mathrm{G} 10^\frac{G_\mathrm{obs}(t)-G_\mathrm{mean}}{2.5} | D_\alpha \sin (\psi)  + D_\delta \cos (\psi) |$$. 
 
 Since the final errors depends on the fitting parameters ($D_\alpha ,D_\delta$), the an iterative procedure must be considered to find the best parameters. 
 
