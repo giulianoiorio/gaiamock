@@ -548,16 +548,14 @@ def predict_astrometry_luminous_binary(ra, dec,
         t = t[np.random.uniform(0, 1, len(t)) > 0.1]
     psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
     t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
-    
-    epoch_err_per_transit = get_realistic_epoch_astrometry_errors(ra, dec, phot_g_mean_mag)
-    epoch_err_per_transit_expect = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)
 
     #Consider the variability and obtain the true magnitudes at each epoch base don the model 
     G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
     G_true = phot_g_mean_mag + G_magnitude_normalised  # instantaneous G magnitude at each epoch
-    
-    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
-    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+
+    epoch_err_per_transit = get_realistic_epoch_astrometry_errors(ra, dec, G_true)
+    epoch_err_per_transit_expect = al_uncertainty_per_ccd_interp(G = G_true)
+    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)
     
 
 
@@ -608,7 +606,10 @@ def predict_astrometry_luminous_binary(ra, dec,
 
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
     
-    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit_expect*np.ones(len(Lambda_pred))
+    #Now estimate observed photometry 
+    G_pred = G_true + phot_epoch_err_per_transit * np.random.randn(len(psi))
+
+    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit_expect*np.ones(len(Lambda_pred)), G_pred, phot_epoch_err_per_transit
 
 
 def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, period, Tp, ecc, omega, inc, w, a0_mas, phot_g_mean_mag, data_release, c_funcs, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
@@ -963,7 +964,7 @@ def fit_5par_solution_only(t_ast_yr, psi, plx_factor, ast_obs, ast_err):
     return [mu[0], mu[1], mu[2], mu[3], mu[4], sigma_mu[0], sigma_mu[1], sigma_mu[2], sigma_mu[3], sigma_mu[4], ruwe, sigma5d_max]
         
 
-def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs, verbose=False, show_residuals=False, ruwe_min = 1.4, skip_acceleration=False, reject_outlier=False, P_min = 10):
+def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs, G_obs=None, G_err=None, verbose=False, show_residuals=False, ruwe_min = 1.4, skip_acceleration=False, reject_outlier=False, P_min = 10):
     '''
     this function takes 1D astrometry and fits it with a cascade of astrometric models.  
     t_ast_yr, psi, plx_factor, ast_obs, ast_err: arrays of astrometric measurements and related metadata
@@ -1056,10 +1057,8 @@ def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_
     
     F2 = np.sqrt(9*nu/2)*(chi2_red**(1/3) + 2/(9*nu) - 1)
     a0_over_err, parallax_over_error = a0_mas/sigma_a0_mas, plx/sig_parallax
-    
-    if show_residuals:
-        plot_residuals(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, theta_array = res, c_funcs = c_funcs)
-    
+    ret_array_binary = [plx, sig_parallax, A, sig_A, B, sig_B, F, sig_F, G, sig_G, period, sig_period, phi_p, sig_phi_p, ecc, sig_ecc, inc_deg, a0_mas, sigma_a0_mas, N_visibility_periods, len(t_ast_yr), F2, ruwe]
+
     if verbose: 
         if F2 < 25:
             print('goodness_of_fit (F2) is low enough to pass DR3 cuts! F2: %.1f' % F2)
@@ -1079,10 +1078,45 @@ def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_
             print('eccentricity error is low enough to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
         else:
             print('eccentricity error is too high to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
+
+
+    if (F2<25) and (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5) and (parallax_over_error > 20000/period) and (sig_ecc < 0.079*np.log(period)-0.244):
     
-    # lots of stuff that can be useful to return
-    return_array = [plx, sig_parallax, A, sig_A, B, sig_B, F, sig_F, G, sig_G, period, sig_period, phi_p, sig_phi_p, ecc, sig_ecc, inc_deg, a0_mas, sigma_a0_mas, N_visibility_periods, len(t_ast_yr), F2, ruwe]
-    return return_array
+        if show_residuals:
+            plot_residuals(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, theta_array = res, c_funcs = c_funcs)
+        
+
+        return ret_array_binary
+    
+
+    #VIMF (last thing checked in the cascade)
+    if (G_obs is None) and (G_err is None):
+        return ret_array_binary #retrocompatibility, if not G provided just return ret_array_binary 
+    elif (G_obs is None):
+        raise ValueError("G_obs cannot be None if G_err is not None")
+    elif (G_err is None):
+        raise ValueError("G_err cannot be None if G_obs is not None")
+    else:
+        #Check prober VIMF
+        F2_vimf, s_vimf, mu_vimf, sigma_mu_vimf = check_VIMF(t_ast_yr,psi,plx_factor,ast_obs,ast_err,G_obs,G_err,binned=binned)
+        plx_over_errvimf = mu_vimf[-1]/sigma_mu_vimf[-1]
+        if (F2_vimf < 25) and (s_vimf > 12) and (plx_over_errvimf > 30):
+            res =  Nret*[-77] #77 for VIMF
+            res[1] = s_vimf
+            res[2], res[3] = mu[-1], sigma_mu[-1] # parallax
+            res[4], res[5] = mu[2], sigma_mu[2] # Dalfa
+            res[6], res[7] = mu[5], sigma_mu[5] # Ddec
+            res[8] = ruwe
+            res[9] = F2_vimf
+            
+            if verbose:
+                print('VIMF parameter solution accepted! Not trying anything else.')
+            if show_residuals:
+                plot_residuals_VIMF(t_ast_yr=t_ast_yr, psi=psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, G_obs=G_obs, G_err=G_err, theta_array=mu, c_funcs= c_funcs)
+            return res
+
+    # If VIMF fails return anyway the binary for retro-compatibility
+    return ret_array_binary
 
 
 def run_full_astrometric_cascade(ra, dec, 
@@ -1120,7 +1154,7 @@ def run_full_astrometric_cascade(ra, dec,
     if c_funcs is None:
         c_funcs = read_in_C_functions()
 
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
                                                                                      parallax = parallax, pmra = pmra, pmdec = pmdec, 
                                                                                      m1 = m1, m2 = m2, 
                                                                                      period = period, Tp = Tp, ecc = ecc, 
@@ -1137,7 +1171,7 @@ def run_full_astrometric_cascade(ra, dec,
             print('not enough visibility periods!')
         return Nret*[0]
         
-    res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min,skip_acceleration=skip_acceleration ) 
+    res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs,  G_obs=G_obs, G_err=G_err, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min,skip_acceleration=skip_acceleration ) 
     
     return res
     
@@ -1413,6 +1447,8 @@ def predict_astrometry_single_source(ra, dec,
 
     epoch_err_per_transit = get_realistic_epoch_astrometry_errors(ra, dec, G_true)
     epoch_err_per_transit_expect = al_uncertainty_per_ccd_interp(G = G_true)
+    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)
+
 
     Lambda_pred = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor 
 
@@ -1426,7 +1462,10 @@ def predict_astrometry_single_source(ra, dec,
     #Add errors
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
 
-    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit_expect*np.ones(len(Lambda_pred))
+    #Now estimate observed photometry 
+    G_pred = G_true + phot_epoch_err_per_transit * np.random.randn(len(psi))
+
+    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit_expect*np.ones(len(Lambda_pred)),  G_pred, phot_epoch_err_per_transit
 
  
 def photocenter_orbit_2d_from_thiele_innes(t_ast_yr, parallax, period, ecc, Tp, A, B, F, G,c_funcs):
