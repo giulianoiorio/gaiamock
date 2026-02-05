@@ -32,7 +32,7 @@ class CustomBuild(build_py):
 # Setup script
 setup(
     name="gaiamock",
-    version="1.2.6",
+    version="2.1.1",
     description="A package for simulatiing Gaia astrometry at epoch level",
     author="Kareem El-Badry",
     author_email="",

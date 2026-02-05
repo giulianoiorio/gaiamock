@@ -57,7 +57,165 @@ import gaiamock_mod as gaiamock
 ```
 and use the same functions you would use in gaiamock, e.g. for predicting epoch astrometry and computing RUWE. 
 
-# A modified version to include the chromaticity effect due to star Variability
+# A modified version to include a comprehensive treatment of variable stars in the astrometric analysis.
+
+The main purpose of this fork is to include variable stars and their effects or biases on astrometric solutions.
+
+Here, we consider two possible configurations: a variable star in isolation, and a variable star in a binary system in which the companion is not variable. We remain agnostic about the source of variability, so any type of variability can be included in the analysis, including irregular behavior such as flares
+
+The effect of a variable star on astrometric analysis involves three main contributions (ordered from least to most likely relevant):
+
+- **Heteroskedastic astrometric errors**:  
+  Since Gaia astrometric and photometric uncertainties depend on the \(G\) magnitude, a variable source will have different errors at different transits. This effect is negligible for sources with $12 \lesssim G \lesssim 15$, where the error curve is nearly flat, but it may become relevant for very bright or very faint sources, where the errors vary rapidly with magnitude.
+
+- **Variability-Induced Mover (VIM)**:  
+  In binary systems, Gaia traces the motion of the photocentre. If one component is variable, changes in its flux will shift the photocentre position. This produces an astrometric signal that can be detectable even when the binary orbital period is too long to be directly detected through orbital motion alone. More details can be found in [Halbwachs+23](http://arxiv.org/abs/2206.05726).
+
+- **Chromatic shift**:  
+  Gaia’s optics are not perfectly achromatic, meaning that the position of a star on the detector depends on its spectral energy distribution (i.e. its color). The Gaia calibration pipeline accounts for this effect assuming a constant source luminosity (see [Chromaticity in Gaia](https://www.google.com/url?sa=t&source=web&rct=j&opi=89978449&url=https://dms.cosmos.esa.int/COSMOS/doc_fetch.php%3Fid%3D2694426&ved=2ahUKEwjslpWj9fqQAxXlVaQEHUg4AdUQFnoECB0QAQ&usg=AOvVaw19wUyqqsQqgIK0X1OY4fHR)). As a result, random photometric variability is largely absorbed into the astrometric noise. However, variable sources that also exhibit color variations will introduce residual, time-dependent patterns, leading to additional time-correlated astrometric noise.
+
+We have created a new module called *gaiamock_var* in which we have updated all the function to take into account al the three effects.
+To use this version:
+```
+import gaiamock_var as gaiamock
+```
+
+This is almost full retrocompatible (except for the function `predict_astrometry_single_source` and `predict_astrometry_luminous_binary`) now returning two additional arrays (see [here](#heteroskedastic-astrometric-errors)). Most of the relevant function now accept an extra parameter, that is a class including the variability model (see  [VariabilityTool class description](#the-variabilitytool-class)). However in all the functions there is a default with a non-variable model, therefore all the codes using standard *gaiamock* should continue to work. 
+To properly include variability effects, the user must define a variability model (see below).
+
+## Heteroskedastic astrometric errors
+
+We have added the epoch dependent estimate of errors in the function 
+
+- `predict_astrometry_single_source`
+- `predict_astrometry_luminous_binary`
+- `predict_astrometry_and_rvs_simultaneously`
+
+In addition to the module *gaiamock_var*  this has been added also to the same functions in the module *gaiamock_mod*.
+
+### Implementation 
+
+Very simply, at each observation epoch t, we have
+
+$$G(t) =G_\mathrm{mean} + dG(t)$$
+
+where $G_\mathrm{mean}$ is the mean magnitude G observed in Gaia (the one stored in the variable *phot_g_mean_mag*) and $dG(t)$ is the scaled light curve used to model the variability (see  [VariabilityTool class description](#the-variabilitytool-class)).
+
+So the epoch erros is $\sigma_\eta=f_{\sigma_{eta}}(G(t))$. The functions now also estimate the photometric errors in the same way $\sigma_G=f_{\sigma_{G}}(G(t))$ (based on tool described [here](https://www.cosmos.esa.int/web/gaia/fitted-dr3-photometric-uncertainties-tool)).
+The two functions also estimate the observed G, $G_\mathrm{obs}$ convolving the true $G(t)$ with the error $\sigma_G(t)$, and with respect to the same functions in the original *gaiamock* it returs two additional arrays containg $G_\mathrm{obs}$ and $G_\mathrm{err}$.
+
+
+## VIM: Astrometric shift induced by variability in binary 
+
+### VIM astrometric bias
+
+As described in [Halbwachs+23](http://arxiv.org/abs/2206.05726), 
+in the case of a binary system hosting a variable source, the source variability causes a change in the flux ratio of the two sources changing the along-scan position of the photocentre, the so called "variability induced movers" (VIM). 
+This effect if actually searched for in the astrometric binary analysis in Gaia DR3 with a dedicated model.  
+Concerning the gaiamock, this effect can be easily introduced 
+by simply estimating the flux luminosity at each scanning time, rather than using a simple value. 
+
+The flux luminosity is defined such as (see [El-Badry+24](https://ui.adsabs.harvard.edu/abs/2024OJAp....7E.100E/abstract))
+
+$$f =  \frac{L_2}{L_1} = 10^{-\frac{G_2 -G_1}{2.5}} =  10^{\frac{G_1 -G_2}{2.5}}, $$
+
+where the subscript 1 refers to the most luminous star, so that we have always $0 \leq f \leq1$. 
+If one of the two stars (let's assume the most luminous one) is a variable star, the current  version of Gaiamock uses the average G-band magnitude, so
+
+$$f  = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}}$$. 
+
+The true flux ratio will be instead 
+
+$$f_\mathrm{var}(t) = 10^{\frac{G_1(t) -G_2}{2.5}} = 10^{\frac{\langle G_1 \rangle -G_2}{2.5}} 10^{\frac{G_1(t) - \langle G_1 \rangle}{2.5}} =  
+f 10^{\frac{d G_1(t)}{2.5}}$$
+
+So the final time dependent flux ratio is equal to the standard averaged one times a correction that depends of the magnitude variation rescaled to have mean magnitude 0. 
+In case of large photometric variations and/or stars with similar magnitude, the role of the primary and secondary can switch. 
+
+#### Implementation 
+
+We further modify  the module **gaiamock_var**, updating the following functions:
+
+- `predict_astrometry_luminous_binary`
+- `predict_astrometry_and_rvs_simultaneously`
+
+The most important change is that while before the flux ratio was constant now depends on the epoch (see above). In addition the phase dependent photometric errors are also consideres same as described in the [previous section](#heteroskedastic-astrometric-errors). Also in this case the functions returns two additional arrays containg $G_\mathrm{obs}$ and $G_\mathrm{err}$.
+
+In case of large photometric variations and/or stars with similar magnitude, the role of the primary and secondary can switch, in this case $f>1$ and we switch primary and secondary by estimating the corrected flux ratio as $1/f$ and the corrected mass ratio as $1/q=m_1/m_2$.
+
+We have modified the same functions also in  `gaiamock_mod`. 
+
+### VIMF model fit
+
+A model to account for the VIM effect is among the one used to check for astrometric binary in GaiaDR3 ([Halbwachs+23](http://arxiv.org/abs/2206.05726)). It assumes that the binary motion is negligible and only the VIM is present, for this reason it is defined as fixed VIM (VIMF).
+The model is quite simple, the astrometric along-scan shift is:
+
+$$
+\eta(t) = \left[ \Delta \alpha + \mu_\alpha t + D_\alpha  \left( \frac{\bar{F_G}}{F_G(t)}-1 \right) \right] \sin (\psi) + \left[ \Delta \delta + \mu_\delta t + D_\delta  \left( \frac{\bar{F_G}}{F_G(t)}-1 \right) \right] \cos (\psi) + \Pi \omega
+$$
+
+with ($\Delta \alpha, \mu_\alpha, \Delta \delta, \mu_\delta, \omega$) the usual 5 paramters of the single star solution (2 positions, 2 proper motions, parallax), and $\vec{D}=(D_\alpha, D_\delta)$ is the parameter to fit to account for the the magnitude and direction of the VIM.
+The ratio $\bar{F_G}{F_G(t)}$ is the inverse of the flux ratio between the epoch flux in the G-band and a reference one, that we assume is the mean related to the measured *phot_g_mean_mag*. To rewrite it as function of the magnitude and its variation we note that 
+$$\frac{\bar{F_G}}{F_G(t)} = 10^\frac{G_\mathrm{obs}(t)-G_\mathrm{mean}}{2.5} $$
+
+In this case however, the data errors are not only dependent on the astrometric error but also on the photometric error. Hence the final error is
+
+$$\sigma(t) = \sqrt{\sigma^2_\eta(t) + \sigma^2_\mathrm{mod}(t)}, $$
+where from the propagation of errors 
+$$\sigma_\mathrm{mod} = \sigma_\mathrm{F} \frac{\bar{F_G}}{F^2_G(t)} | D_\alpha \sin (\psi)  + D_\delta \cos (\psi) |,$$
+
+same for the propagation of errors we can write
+
+$$\sigma_F = \frac{\ln 10}{2.5} * \sigma_G * 10**(-G/2.5)= \frac{\ln 10}{2.5}  \sigma_G  10^{-G/2.5}=  \frac{\ln 10}{2.5} \sigma_G  F$$, so
+
+$$\sigma_\mathrm{mod} = \frac{\ln 10}{2.5} \sigma_\mathrm{G} \frac{\bar{F_G}}{F_G(t)} | D_\alpha \sin (\psi)  + D_\delta \cos (\psi) | = \frac{\ln 10}{2.5} \sigma_\mathrm{G} 10^\frac{G_\mathrm{obs}(t)-G_\mathrm{mean}}{2.5} | D_\alpha \sin (\psi)  + D_\delta \cos (\psi) |$$. 
+
+Since the final errors depends on the fitting parameters ($D_\alpha ,D_\delta$), the an iterative procedure must be considered to find the best parameters. 
+
+
+#### Implementation 
+
+We have added the function 
+ - `check_VIMF` 
+ 
+ following the implementations of the other check function (in particular of `check_7par` since they share the same number of paramters). The difference with respect to the other check functions is that it requests two additional paramters containing the epoch photometry: $G_\mathrm{obs}$ and $G_\mathrm{err}$. These are present in the output of both `predict_astrometry_luminous_binary` and 
+and `predict_astrometry_single_source`.
+
+Using the epoch photometry, the function gets a first estimate of 
+$D$ and $\sigma_\mathrm{mod}$, then it checks if at all the epochs $\sigma_\mathrm{mod}<0.01 \sigma_\eta$, if this is the case this first solution is accepted as the main one, otherwise it stars an iterative fitting procedure updating each time $D$ and $\sigma_\mathrm{mod}$, until both components of $D$ converge within 1% or the number of iterations reach 5.
+
+The final output of the method includes:
+
+- $F_2$ statistic (goodness of fit, Eq. 1 in [Halbwachs+23](http://arxiv.org/abs/2206.05726))
+- $s$ statistic (signficance, Eq. 3 in [Halbwachs+23](http://arxiv.org/abs/2206.05726))
+- 7 best-fit parameters with:
+    - Position offset along ra
+    - Proper motion along ra
+    - $D$ component along ra 
+    - Position offset along dec 
+    - Proper motion along dec
+    - $D$ component along dec
+    - parallax 
+- 7 errors pf the best-fit parameters (order as above).
+
+Given the implementation of the new astrometric binary model, we have integrated it in the functions:
+
+- `fit_full_astrometric_cascade`
+- `run_full_astrometric_cascade`
+
+In the first function there are now two additional parameters $G_\mathrm{obs}$ and $G_\mathrm{err}$ that by default are None. If both of them are not None and include the epoch photometry (output of the `predict_astrometry_luminous_binary function`), then the last step of the Gaia astrometric cascade is activated. 
+This last model is the VIMF and was not included in the standard *gaiamock*. 
+
+The VIMF model is checked only if the full binary solution is not accepted. Then to accept or not the VIFM, we implement the criteria discussed in [Halbwachs+23](http://arxiv.org/abs/2206.05726):
+
+- $F_2<25$
+- $s>12$
+- $\frac{\omega}{\sigma_\omega}>30$ (parallax over parallax error)
+
+**Note** In  [Halbwachs+23](http://arxiv.org/abs/2206.05726), the condition $s>12$ is used just as a pre-condition to accept the solution, but then no solutions with $s<20$ are included in the final catalogue
+We still use 12 to be consistent with the rest of the astrometric cascade (also the acceleration and variable acceleration are treated in the same way in Gaia, but in *gaiamock* a threshould of 12 is used).
+
+## Chromaticity effect
 
 IN Gaia, the measured along-scan (AL) centroid of a star depends not only on its true astrometric motion but also on its spectral
 energy distribution (SED).
@@ -113,7 +271,7 @@ $$
 
 In thi case the effect of the chromatic shfit will be larger for bright source with small astrometric  uncertanties and becomes negligible for faint source.
 
-## Implementation
+### Implementation
 
 We added the module **gaiamock_var**, which includes the same functions as the standard `gaiamock` module,  
 but with variations in the following functions:
@@ -141,9 +299,10 @@ Currently available classes include:
 
 The section below describes how to use the available classes and how to implement new ones.
 
-### The VariabilityTool class 
 
-#### VariabilityTool: framework for modelling variability-induced chromatic shifts
+## The VariabilityTool class 
+
+### VariabilityTool: framework for modelling variability-induced chromatic shifts
 
 The `VariabilityTool` framework provides a unified and extensible
 interface to model **intrinsic photometric variability** and its impact
@@ -158,8 +317,10 @@ All variability models implemented within this framework must:
 -   Define the attributes
     -   `fchrom`: scaling factor converting AL uncertainty into chromatic shift.
     -   `relative_norm`: boolean flag controlling the normalisation scheme
--   Implement the `__call__(time)` method returning a colour- or
-    flux-variability signal evaluated at BJD(TCB) times
+-   Implement the `__call__(self,time)` method returning a colour
+    variability signal evaluated at BJD(TCB) times (rescaled for the colour average).
+-   Implement the `g_lcurve_normalised(self,time)` method returning the 
+    flux-variability signal evaluated at BJD(TCB) times (rescaled for the magnitude average).
 
 The goal is to provide a standardised way to inject colour variability
 and study its effect on Gaia astrometric solutions---while ensuring
@@ -167,7 +328,7 @@ backward compatibility when no variability is applied.
 
 ------------------------------------------------------------------------
 
-#### \### Core concept and behaviour
+#### Core concept and behaviour
 
 The base class:
 
@@ -175,6 +336,7 @@ The base class:
 class VariabilityTool:
     def __init__(self, fchrom, relative_norm=True)
     def __call__(self, time)
+    def g_lcurve_normalised(self,time)
 ```
 
 implements the following logic:
@@ -196,7 +358,7 @@ implements the following logic:
     The induced astrometric shift becomes larger for bright stars (with
     smaller AL uncertainties) and smaller for faint stars. This value corresponds to the expected shift for a colour variability (with respect to the mean) of 1 mag
 
--   **`__call__(time)`**\
+-   **`__call__(self,time)`**\
     This is the function that will be called in Gaiamock to get the colour at at given time of 
     Gaia observations, then it will be internally transformed to a shift based on the parameter 
     `fchrom` and `relative_norm`
@@ -206,6 +368,13 @@ implements the following logic:
     the standard `gaiamock` behaviour.
     **Note**, when called within Gaiamock the time will be in BJD in TCB. 
 
+- **`g_lcurve_normalised(self,time)`**\
+    This is the function that will be called in Gaiamock to get the flux  at at given time of  Gaia observations, then it will be used to estimate the flux ratio and then along-scan position in combination with the shift due to the binary motion.
+    The base implementation returns zero variability, making
+    `VariabilityTool` a no-op. Using the default instance
+    or not overloading the method ensures perfect backward compatibility with
+    the standard `gaiamock` behaviour.
+    **Note**, when called within Gaiamock the time will be in BJD in TCB. 
 
 Typical usage:
 
@@ -318,6 +487,7 @@ $$
 from variability_tool import RRLVariable
 vt = RRLVariable(gaiadf=sos_row, fchrom=1.0, relative_norm=False)
 color_variation = vt(time_bjd_tcb)
+Gmag_variation = vt.g_lcurve_normalised(time_bjd_tcb)
 ```
 
 This class is ideal forsimulations of RR Lyrae astrometric biases in Gaia-like pipelines.
@@ -343,7 +513,12 @@ class MyCustomVariability(VariabilityTool):
         # store your parameters here
 
     def __call__(self, time):
-        # Compute the variability signal at BJD(TCB) times
+        # Compute the colour variability signal at BJD(TCB) times
+        # Must return an array-like with the same length as time
+        return <your expression>
+
+    def g_lcurve_normalised(self, time):
+        # Compute the magnitude variability signal at BJD(TCB) times
         # Must return an array-like with the same length as time
         return <your expression>
 ```
@@ -371,15 +546,22 @@ class MyCustomVariability(VariabilityTool):
 
 ``` python
 class FlareVariability(VariabilityTool):
-    def __init__(self, amp, tau, t0, fchrom, relative_norm=True):
+    def __init__(self, amp_g, amp_color, tau, t0, fchrom, relative_norm=True):
         super().__init__(fchrom=fchrom, relative_norm=relative_norm)
-        self.amp = amp
+        self.amp_g = amp_g
+        self.amp_color = amp_color
         self.tau = tau
         self.t0 = t0
 
     def __call__(self, time):
         dt = time - self.t0
-        return self.amp * np.exp(-np.clip(dt, 0, None) / self.tau)
+        return self.amp_color * np.exp(-np.clip(dt, 0, None) / self.tau)
+
+    def g_lcurve_normalised(self, time):
+        # Compute the magnitude variability signal at BJD(TCB) times
+        # Must return an array-like with the same length as time
+        dt = time - self.t0
+        return self.amp_g * np.exp(-np.clip(dt, 0, None) / self.tau)
 ```
 
 

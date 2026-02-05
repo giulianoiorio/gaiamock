@@ -28,6 +28,16 @@ def al_uncertainty_per_ccd_interp(G):
     sigma_eta = [0.4, 0.35, 0.15, 0.17, 0.23, 0.13,0.13, 0.135, 0.125, 0.13, 0.15, 0.23, 0.36, 0.63, 1.05, 2.05, 4.1]
     return np.interp(G, G_vals, sigma_eta)
 
+def photometric_uncertainty_per_ccd_interp(G):
+    '''
+    This gives the photometric uncertainty *per CCD* (not per FOV transit) as an interpolation 
+    of values obtained with the tool provided by Gaia for the EDR3 uncertanties (https://www.cosmos.esa.int/web/gaia/fitted-dr3-photometric-uncertainties-tool)
+    '''    
+    G_vals     = [4,5, 6,  6.5,   7, 7.5, 8.,8.5, 9, 9.5, 10, 10.3, 10.7, 11,  11.3, 11.8,   12.5,    13, 13.5,  14,  15,   16,   17,   18,   19,  20]
+    sigma_phot = [0.02,0.013,0.005,0.003,0.003,0.003,0.004,0.004,0.003,0.003,0.003,0.004,0.003,0.003,0.005,0.003,0.004,0.004,0.003,0.004,0.005,0.008,0.014,0.024,0.044,0.085]
+    return np.interp(G, G_vals, sigma_phot)
+
+
 
 def al_chromatic_shift(Gmean,delta_bp_rp,fchrom=0.2,relative_norm=True):
     '''
@@ -395,6 +405,129 @@ def check_9par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned=True):
     s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
     return F2, s, mu, sigma_mu
 
+def check_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err, binned = True):
+    '''
+    This function takes a set of astrometric and photometric data (t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err)
+    and fits a VIMF (fixed variability-induced motion) solution. 
+    The fixed VIMF model assumes that the orbital motion of the components relative to their barycenter is negligible during the Gaia mission.
+    The parameters are the same of the 5-par solution (ra, pmra, dec, pmdec, plx) plus
+    2 parameters describing the direction and amplitude of the VIM effect.
+    The model is described in detail in  Halbwachs+23 (Sec. 6, https://www.aanda.org/articles/aa/pdf/2023/06/aa43969-22.pdf).
+    The final shift is  
+    delta_AL_VIM = delta_AL_5par +  D_alpha*(<F>/F-1)*sin(psi) * D_delta*(<F>/F-1)*cos(psi)
+    where D_alpha and D_delta are the two VIMF parameters to be fitted, <F> is the mean flux, and F is the instantaneous flux.
+    While delta_AL_5par is the standard 5-parameter astrometric model: (alpha + mu_alpha*t) * sin(psi) + (delta + mu_delta*t)*cos(psi) + parallax_factor*plx. 
+
+    Now the ratio <F>/F can be written in terms of magnitudes as:
+    <F>/F = 10**(0.4*(m - <m>))
+    where m is the instantaneous magnitude, and <m> is the mean magnitude.
+    If we use as usual a rescaled magnitude difference dm = m - <m>, we have:
+    <F>/F - 1 = 10**(0.4*dm) - 1, 
+
+    So rearring the equation for delta_AL_VIM to be consisent with the standard linear  model, we have:
+    delta_AL_VIM = [alpha + mu_alpha*t + D_alpha*(10**(0.4*dm) - 1)] * sin(psi) +
+                   [delta + mu_delta*t + D_delta*(10**(0.4*dm) - 1)] * cos(psi) +
+                   parallax_factor*plx
+
+    The function requires a variability_tool object from variability_tool.py to calculate dm at each epoch.
+    It also requires the data_release to calculate the correct times (t_ast_yr) from
+    the observation times in JD.
+
+    It inflates the uncertainties according to the goodness of fit and returns the best-fit parameters and uncertainties and F2 and significance associated with the solution.
+    The vector of best-fit parameters is:
+    mu = [ra, pmra, D_alpha, dec, pmdec, D_delta, plx], accordingly the errors are
+    sigma_mu = [sigma_ra, sigma_pmra, sigma_D_alpha, sigma_dec, sigma_pmdec, sigma_D_delta, sigma_plx]
+
+
+    ##Dealing with photometric uncertainties:
+    If photometric_uncertainties=True, the function adds random Gaussian errors to the magnitudes at each epoch according to the G-band photometric uncertainties.
+    Then it implements an iterative procedure to re-calculate the astrometric uncertainties including the contribution from photometric uncertainties,
+    and re-fits the VIMF model until convergence is reached (or a maximum of 5 iterations).
+    This is important because the photometric uncertainties propagate into the astrometric model via the VIMF terms.
+    From Halbwachs+23, Eq. 19 the final astrometric uncertainties including the contribution from photometric uncertainties are:
+    sigma_total = sqrt( sigma_astrometry^2 + sigma_mod^2 )
+    where sigma_astrometry are the original astrometric uncertainties (ast_err), and sigma_mod is the contribution from photometric uncertainties.
+    From Halbwachs+23 Eq. 18: sigma_mod = sigma_F * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    now since F propto 10**(-G/2.5), we have sigma_F = sqrt( (d F /d G)^2 sigma_G^2) = sqrt(10**(-G/2.5) * -ln(10)/2.5 * sigma_G)^2 =  ln(10)/2.5 * F * sigma_G
+    so sigma_mod = ln(10)/2.5 * F * sigma_G * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)| = ln(10)/2.5 * sigma_G * F_ref/F * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    but Fref/F = 10**(0.4*dG) = flux_factor + 1, so finally:   sigma_mod = ln(10)/2.5 * sigma_G * (flux_factor + 1) * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    '''
+    Cinv = np.diag(1/ast_err**2)  #Errors 
+
+    dG_obs = G_obs - np.mean(G_obs)    # rescale to mean zero, because the model is generated without errors, but we want to maitain the assumption that dG is rescaled to <G>
+    flux_factor = 10**(0.4*dG_obs) - 1 #noisy flux factor from observed magnitudes with errors
+    
+    #Proceed with the first attempt 
+    M = np.vstack([np.sin(psi),                 #alpha
+                   t_ast_yr*np.sin(psi),        #mu_alpha
+                   flux_factor*np.sin(psi),     #D_alpha
+                   np.cos(psi),                 #delta
+                   t_ast_yr*np.cos(psi),        #mu_delta
+                   flux_factor*np.cos(psi),     #D_delta
+                   plx_factor]).T               #parallax
+    
+
+    #First run without photometric uncertainties
+    mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+    Lambda_pred = np.dot(M, mu)
+
+    #Estimate the effect of photometric uncertanties. 
+    #From Halbwachs+23, Eq. 18: sigma_mod = sigma_F * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    #now since F propto 10**(-G/2.5), we have sigma_F = sqrt( (d F /d G)^2 sigma_G^2) = sqrt(10**(-G/2.5) * -ln(10)/2.5 * sigma_G)^2 =  ln(10)/2.5 * F * sigma_G
+    #so sigma_mod = ln(10)/2.5 * F * sigma_G * F_ref/F^2 * |D_alpha*sin(psi) + D_delta*cos(psi)| = ln(10)/2.5 * sigma_G * F_ref/F * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    #but Fref/F = 10**(0.4*dG) = flux_factor + 1, so finally:   sigma_mod = ln(10)/2.5 * sigma_G * (flux_factor + 1) * |D_alpha*sin(psi) + D_delta*cos(psi)|
+    D_alpha, D_delta = mu[2], mu[5]
+    sigma_mod = np.log(10)/2.5 * G_err * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+
+    #Now check if sigma_mod is negligible compared to astrometric uncertainties, just accept this solution 
+    #otherwise start an iterative procedure to re-calculate the astrometric uncertainties including the contribution from photometric uncertainties.
+    # We consider sigma_mod negligible if it is less than 1% of astrometric uncertainties (consider all the elements, since the errors are now per-epoch).
+    if np.any(sigma_mod > 0.01*ast_err):
+        D_alpha_old, D_delta_old, iteration = D_alpha*100, D_delta*100, 0
+        #Start iterative procedure considering a relative change of 1% in D_alpha and D_delta as convergence criterion or a maximum of 5 iterations
+        while (np.abs(D_alpha - D_alpha_old)/np.abs(D_alpha_old) > 1e-2 or np.abs(D_delta - D_delta_old)/np.abs(D_delta_old) > 1e-2) and iteration < 5:
+            D_alpha_old, D_delta_old = D_alpha, D_delta
+            ast_err_updated = np.sqrt( ast_err**2 + sigma_mod**2)
+            Cinv = np.diag(1/ast_err_updated**2)  #Updated Errors
+            mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs)  # ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+            Lambda_pred = np.dot(M, mu)
+            D_alpha, D_delta = mu[2], mu[5]
+            sigma_mod = np.log(10)/2.5 * G_err * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+            iteration += 1  
+        ast_err_VIMF = ast_err_updated
+    else:
+        ast_err_VIMF = ast_err
+
+    ##Now residuals and statistic
+    resids = ast_obs - Lambda_pred
+    Nobs, nu, nu_unbinned = len(ast_obs), len(ast_obs) - 7, len(ast_obs)*8 - 7 #/ 7 parameters: ra, pmra, D_alpha, dec, pmdec, D_delta, plx
+
+    #Estimate F2 (equation 1 in Halbwachs+23)
+    chi2_red_binned = np.sum(resids**2/ast_err_VIMF**2)/nu
+    chi2_red_unbinned = predict_reduced_chi2_unbinned_data(chi2_red_binned = chi2_red_binned, n_param = 7, N_points = Nobs, Nbin=8)
+    if binned:
+        F2 = predict_F2_unbinned_data(chi2_red_binned = chi2_red_binned, n_param = 7, N_points = Nobs, Nbin=8)
+        cc = np.sqrt(chi2_red_unbinned/((1-2/(9*nu_unbinned))**3 ))
+    else:
+        F2 = np.sqrt(9*nu/2)*(chi2_red_binned**(1/3) + 2/(9*nu) -1  )
+        cc = np.sqrt(chi2_red_binned/((1-2/(9*nu))**3 ))
+
+    #Estimate the significance, i.e. a statistic to quantify if the addition of two parameters is 
+    #justified by the data (equation 3 in Halbwachs+23).
+    #In this case the two additional parameters are D_alpha and D_delta (indices 2 and 5 in the mu vector)
+    cov_matrix = np.linalg.inv(M.T @ Cinv @ M)
+    sigma_mu = cc*np.sqrt(np.diag(cov_matrix))
+    cov25 = cov_matrix[2][5]*cc**2
+    
+    p1, p2, sig1, sig2 = mu[2], mu[5], sigma_mu[2], sigma_mu[5]
+    rho12 = cov25/(sig1*sig2)
+    s = 1/(sig1*sig2)*np.sqrt((p1**2*sig2**2 + p2**2*sig1**2 - 2*p1*p2*rho12*sig1*sig2)/(1-rho12**2))
+    
+    #F2 is goodness of fit statistic (Eq. 1 in Halbwachs+23)
+    #s is significance of the VIMF solution (Eq. 3 in Halbwachs+23)
+    #mu is the best-fit parameters vector: [ra, pmra, D_alpha, dec, pmdec, D_delta, plx]
+    #sigma_mu is the uncertainties vector: [sigma_ra, sigma_pmra, sigma_D_alpha, sigma_dec, sigma_pmdec, sigma_D_delta, sigma_plx]
+    return F2, s, mu, sigma_mu
 
 def al_bias_binary(delta_eta, q, f, u = 90):
     '''
@@ -446,7 +579,75 @@ def rescale_times_astrometry(jd, data_release):
         raise ValueError('invalid data_release!')
     t_ast_yr = t_ast_day/365.25
     return t_ast_yr
+
+def get_jd_from_tast_yr(t_ast_yr, data_release):
+    '''
+    inverse of rescale_times_astrometry()
+    '''
+    if data_release == 'dr3':
+        jd = t_ast_yr*365.25 + 2457389.0
+    elif data_release == 'dr4':
+        jd = t_ast_yr*365.25 + 2457936.875
+    elif data_release == 'dr5':
+        jd = t_ast_yr*365.25 + 2458818.5
+    else: 
+        raise ValueError('invalid data_release!')
+    return jd
+
+def predict_astrometry_single_source(ra, dec, 
+                                     parallax, pmra, pmdec, 
+                                     phot_g_mean_mag, 
+                                     data_release, c_funcs=None, 
+                                     variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
+    '''
+    this function predicts the epoch-level astrometry for single source. 
+    ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
+    parallax (mas): the true parallax (i.e., 1/d)
+    pmra, pmdec: true proper motions in mas/yr
+    phot_g_mean_mag: G-band magnitude
+    c_funcs: from read_in_C_functions()
+    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
+    '''
     
+    t = get_gost_one_position(ra, dec, data_release=data_release)
+    
+    # reject a random 10%
+    t = t[np.random.uniform(0, 1, len(t)) > 0.1]
+    psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
+    t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
+
+    #Consider the variability and obtain the true magnitudes at each epoch base don the model 
+    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
+    G_true = phot_g_mean_mag + G_magnitude_normalised  # instantaneous G magnitude at each epoch
+    
+    #GIU 07/01/25: now in case of a variable star the errors are etherostheteroskedastic and dependes on the true G
+    N_ccd_avg = 8
+    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    
+    if phot_g_mean_mag < 13:
+        extra_noise = np.random.uniform(0, 0.04)
+    else: 
+        extra_noise = 0
+    
+    Lambda_pred = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor 
+
+    #Add chromaticity effect due to color variability
+    colors = variability_tool(jds)
+    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
+                                          fchrom=variability_tool.fchrom, 
+                                          relative_norm=variability_tool.relative_norm)
+    Lambda_pred += Lambda_chromatic
+
+    Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
+    Lambda_pred += extra_noise*np.random.randn(len(psi)) # unmodeled noise
+
+    #Now estimate observed photometry 
+    G_pred = G_true + phot_epoch_err_per_transit * np.random.randn(len(psi))
+
+    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit, G_pred, phot_epoch_err_per_transit
+
+
 def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, period, Tp, ecc, omega, inc, w, phot_g_mean_mag, f, data_release, c_funcs, do_blending_noise = False, reject_10_percent = True, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
     '''
     this function predicts the epoch-level astrometry for a binary as it would be observed by Gaia. 
@@ -471,15 +672,21 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     '''
     
     t = get_gost_one_position(ra, dec, data_release=data_release)
-    
+
     # reject a random 10%
     if reject_10_percent:
         t = t[np.random.uniform(0, 1, len(t)) > 0.1]
     psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
     t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
     
+    #Consider the variability and obtain the true magnitudes at each epoch base don the model 
+    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
+    G_true = phot_g_mean_mag + G_magnitude_normalised  # instantaneous G magnitude at each epoch
+    
+    #GIU 07/01/25: now in case of a variable star the errors are etherostheteroskedastic and dependes on the true G
     N_ccd_avg = 8
-    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)/np.sqrt(N_ccd_avg)
+    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
     
     if phot_g_mean_mag < 13:
         extra_noise = np.random.uniform(0, 0.04)
@@ -499,7 +706,25 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
     
     x, y = B_pred*X + G_pred*Y, A_pred*X + F_pred*Y   
     delta_eta = (-y*cpsi - x*spsi) 
-    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f) for i in range(len(psi))])
+    #GI 05/01/2025: Now account for the effect of variability in the G-band
+    #the variability introduce a modulation of the flux ratio that affect the photocenter position
+    #this effect is indeed used to fit the so called "variability induced movers" (VIM) in Gaia DR3
+    #(see Halbwachs+23 paper, Section 6 https://ui.adsabs.harvard.edu/abs/2023A%26A...674A...9H/abstract)
+    # Considering that f=10**(G1-G2)/2.5, where G1 and G2 are the magnitudes of the two components (G1 is the brighter one),
+    # so if G1 is variable, we have G1(t) = <G1> + delta_G1(t) and f_new=10**((<G1> + delta_G1(t) - G2)/2.5) = f * 10**(delta_G1(t)/2.5)
+    # so we can write the flux ratio including variability as:
+    # f_new = f * 10**(0.4*delta_G(t))
+    # where delta_G(t)=G(t) - <G> and G(t) is the instantaneous magnitude of the system at time t
+    # and <G> is the mean magnitude of the system (phot_g_mean_mag) used to estimate f 
+    f_variable = f * 10**(0.4*G_magnitude_normalised)
+
+    #Deal with possibile switch of primary (most luminous)/secondary due to variability
+    #If f_variable>1, we have to switch primary and secondary so that f'=1/f
+    #and q'=1/q=m1/m2.
+    f_variable_final = np.where(f_variable<1,f_variable,1/f_variable) #if f>1
+    q_variable_final = np.where(f_variable<1,m2/m1,m1/m2)
+
+    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=q_variable_final[i], f=f_variable_final[i]) for i in range(len(psi))])
     Lambda_com = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor # barycenter motion
     Lambda_pred = Lambda_com + bias # binary motion
 
@@ -519,8 +744,11 @@ def predict_astrometry_luminous_binary(ra, dec, parallax, pmra, pmdec, m1, m2, p
         blending_noise = 0.5*np.random.randn(len(psi))
         blending_noise[np.abs(delta_eta) < 45] = 0 # 0 if \Delta \eta < resolution/2
         Lambda_pred += blending_noise
+
+    #Now estimate observed photometry 
+    G_pred = G_true + phot_epoch_err_per_transit * np.random.randn(len(psi))
     
-    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit*np.ones(len(Lambda_pred))
+    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit, G_pred, phot_epoch_err_per_transit
 
 
 def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, period, Tp, ecc, omega, inc, w, a0_mas, phot_g_mean_mag, data_release, c_funcs, variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
@@ -550,8 +778,14 @@ def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, per
     psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
     t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
     
+    #Consider the variability and obtain the true magnitudes at each epoch base don the model 
+    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
+    G_true = phot_g_mean_mag + G_magnitude_normalised  # instantaneous G magnitude at each epoch
+
+    #GIU 07/01/25: now in case of a variable star the errors are etherostheteroskedastic and dependes on the true G
     N_ccd_avg = 8
-    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)/np.sqrt(N_ccd_avg)
+    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
+    phot_epoch_err_per_transit = photometric_uncertainty_per_ccd_interp(G = G_true)/np.sqrt(N_ccd_avg)
     
     if phot_g_mean_mag < 13:
         extra_noise = np.random.uniform(0, 0.04)
@@ -585,7 +819,10 @@ def predict_astrometry_binary_in_terms_of_a0(ra, dec, parallax, pmra, pmdec, per
     Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
     Lambda_pred += extra_noise*np.random.randn(len(psi)) # unmodeled noise
     
-    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit*np.ones(len(Lambda_pred))
+    #Now estimate observed photometry 
+    G_pred = G_true + phot_epoch_err_per_transit * np.random.randn(len(psi))
+
+    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit, G_pred, phot_epoch_err_per_transit
  
 def get_realistic_epoch_astrometry_errors(ra, dec, phot_g_mean_mag):
     '''
@@ -783,6 +1020,54 @@ def plot_residuals_7par(t_ast_yr, psi, plx_factor, ast_obs, ast_err, theta_array
     ax[0].set_ylabel('residual (5 par)', fontsize=20)
     ax[1].set_ylabel('residual (7 par)', fontsize=20)
 
+def plot_residuals_VIMF(t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err, theta_array, c_funcs=None):
+    '''
+    this function takes a set of epoch astrometry (as described by t_ast_yr, psi, plx_factor, ast_obs, and ast_err), and a set of linear parameters for a VIMF solution, theta_array = (ra, pmra, Dra, dec, pmdec, Ddec, plx), and predicts the epoch astrometry. 
+    It also calculates the best-fit 5 parameter solution for the same astrometry. Finally, it plots the epoch astrometry residuals as a function of time for both solutions. 
+    '''
+    # 5 parameter solution
+    Cinv = np.diag(1/ast_err**2)    
+    M = np.vstack([np.sin(psi), t_ast_yr*np.sin(psi), np.cos(psi), t_ast_yr*np.cos(psi), plx_factor]).T 
+    mu = np.linalg.solve(M.T @ Cinv @ M, M.T @ Cinv @ ast_obs) #  ra, pmra, dec, pmdec, parallax
+    Lambda_pred = np.dot(M, mu)
+    
+    nrow, width, height_scale = 2, 6, 1
+    xlim = [np.min(t_ast_yr)-0.2, np.max(t_ast_yr)+0.2]
+    f, ax = plt.subplots(nrow, 1, figsize = (width, 1+3*nrow*height_scale))
+    plt.subplots_adjust(hspace = 0)
+    for i in range(nrow):
+        ax[i].set_xlim(xlim)
+        ax[i].tick_params(labelsize = 18)
+        if i != nrow - 1:
+            ax[i].set_xticklabels([])
+    ax[0].errorbar(t_ast_yr, ast_obs - Lambda_pred, yerr=ast_err, fmt='k.')
+    print('single star chi2: %.2f'  % (np.sum( (ast_obs - Lambda_pred)**2 / ast_err**2 )) )
+    
+    # VIMF  solution
+    dG_obs = G_obs - np.mean(G_obs)    # rescale to mean zero, because the model is generated without errors, but we want to maitain the assumption that dG is rescaled to <G>
+    flux_factor = 10**(0.4*dG_obs) - 1 #noisy flux factor from observed magnitudes with errors
+    D_alpha, D_delta = theta_array[2], theta_array[5]
+    sigma_mod = np.log(10)/2.5 * G_err * (flux_factor + 1) * np.abs( D_alpha * np.sin(psi) + D_delta * np.cos(psi) )
+    ast_err_updated = np.sqrt( ast_err**2 + sigma_mod**2)
+            
+    #Proceed with the first attempt 
+    M = np.vstack([np.sin(psi),                 #alpha
+                   t_ast_yr*np.sin(psi),        #mu_alpha
+                   flux_factor*np.sin(psi),     #D_alpha
+                   np.cos(psi),                 #delta
+                   t_ast_yr*np.cos(psi),        #mu_delta
+                   flux_factor*np.cos(psi),     #D_delta
+                   plx_factor]).T               #parallax
+            
+    Lambda_pred = np.dot(M, theta_array)
+    resids = ast_obs - Lambda_pred
+    chi2 = np.sum(resids**2/ast_err_updated**2)
+ 
+    print('VIMF chi2: %.2f' % chi2 )
+    ax[1].errorbar(t_ast_yr, ast_obs - Lambda_pred, yerr=ast_err, fmt='k.')
+    ax[1].set_xlabel('time (years)', fontsize=20)
+    ax[0].set_ylabel('residual (5 par)', fontsize=20)
+    ax[1].set_ylabel('residual (VIMF)', fontsize=20)
     
 def get_uncertainties_at_best_fit_binary_solution(t_ast_yr, psi, plx_factor, ast_obs, ast_err, p0, c_funcs, binned=True, reject_outlier=False):
     '''
@@ -880,7 +1165,7 @@ def fit_5par_solution_only(t_ast_yr, psi, plx_factor, ast_obs, ast_err, binned =
     return [mu[0], mu[1], mu[2], mu[3], mu[4], sigma_mu[0], sigma_mu[1], sigma_mu[2], sigma_mu[3], sigma_mu[4], ruwe, sigma5d_max]
         
 
-def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_funcs, verbose=False, show_residuals=False, binned = True, ruwe_min = 1.4, skip_acceleration=False, reject_outlier=False, P_min = 10):
+def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err,  c_funcs, G_obs=None, G_err=None, verbose=False, show_residuals=False, binned = True, ruwe_min = 1.4, skip_acceleration=False, reject_outlier=False, P_min = 10):
     '''
     this function takes 1D astrometry and fits it with a cascade of astrometric models.  
     t_ast_yr, psi, plx_factor, ast_obs, ast_err: arrays of astrometric measurements and related metadata
@@ -977,9 +1262,8 @@ def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_
         F2 = np.sqrt(9*nu/2)*(chi2_red_binned**(1/3) + 2/(9*nu) - 1)
     a0_over_err, parallax_over_error = a0_mas/sigma_a0_mas, plx/sig_parallax
     
-    if show_residuals:
-        plot_residuals(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, theta_array = res, c_funcs = c_funcs)
-    
+    ret_array_binary = [plx, sig_parallax, A, sig_A, B, sig_B, F, sig_F, G, sig_G, period, sig_period, phi_p, sig_phi_p, ecc, sig_ecc, inc_deg, a0_mas, sigma_a0_mas, N_visibility_periods, len(t_ast_yr), F2, ruwe]
+
     if verbose: 
         if F2 < 25:
             print('goodness_of_fit (F2) is low enough to pass DR3 cuts! F2: %.1f' % F2)
@@ -999,10 +1283,45 @@ def fit_full_astrometric_cascade(t_ast_yr, psi, plx_factor, ast_obs, ast_err, c_
             print('eccentricity error is low enough to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
         else:
             print('eccentricity error is too high to pass DR3 cuts! ecc_error: %.2f' % sig_ecc)
+
+
+    if (F2<25) and (a0_over_err > 158/np.sqrt(period)) and (a0_over_err > 5) and (parallax_over_error > 20000/period) and (sig_ecc < 0.079*np.log(period)-0.244):
     
-    # lots of stuff that can be useful to return
-    return_array = [plx, sig_parallax, A, sig_A, B, sig_B, F, sig_F, G, sig_G, period, sig_period, phi_p, sig_phi_p, ecc, sig_ecc, inc_deg, a0_mas, sigma_a0_mas, N_visibility_periods, len(t_ast_yr), F2, ruwe]
-    return return_array
+        if show_residuals:
+            plot_residuals(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, theta_array = res, c_funcs = c_funcs)
+        
+
+        return ret_array_binary
+    
+
+    #VIMF (last thing checked in the cascade)
+    if (G_obs is None) and (G_err is None):
+        return ret_array_binary #retrocompatibility, if not G provided just return ret_array_binary 
+    elif (G_obs is None):
+        raise ValueError("G_obs cannot be None if G_err is not None")
+    elif (G_err is None):
+        raise ValueError("G_err cannot be None if G_obs is not None")
+    else:
+        #Check prober VIMF
+        F2_vimf, s_vimf, mu_vimf, sigma_mu_vimf = check_VIMF(t_ast_yr,psi,plx_factor,ast_obs,ast_err,G_obs,G_err,binned=binned)
+        plx_over_errvimf = mu_vimf[-1]/sigma_mu_vimf[-1]
+        if (F2_vimf < 25) and (s_vimf > 12) and (plx_over_errvimf > 30):
+            res =  Nret*[-77] #77 for VIMF
+            res[1] = s_vimf
+            res[2], res[3] = mu[-1], sigma_mu[-1] # parallax
+            res[4], res[5] = mu[2], sigma_mu[2] # Dalfa
+            res[6], res[7] = mu[5], sigma_mu[5] # Ddec
+            res[8] = ruwe
+            res[9] = F2_vimf
+            
+            if verbose:
+                print('VIMF parameter solution accepted! Not trying anything else.')
+            if show_residuals:
+                plot_residuals_VIMF(t_ast_yr=t_ast_yr, psi=psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, G_obs=G_obs, G_err=G_err, theta_array=mu, c_funcs= c_funcs)
+            return res
+
+    # If VIMF fails return anyway the binary for retro-compatibility
+    return ret_array_binary
 
 
 def run_full_astrometric_cascade(ra, dec, 
@@ -1040,7 +1359,7 @@ def run_full_astrometric_cascade(ra, dec,
     if c_funcs is None:
         c_funcs = read_in_C_functions()
 
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
                                                                                      parallax = parallax, pmra = pmra, pmdec = pmdec, 
                                                                                      m1 = m1, m2 = m2, 
                                                                                      period = period, Tp = Tp, ecc = ecc, 
@@ -1056,11 +1375,11 @@ def run_full_astrometric_cascade(ra, dec,
             print('not enough visibility periods!')
         return Nret*[0]
         
-    res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min,skip_acceleration=skip_acceleration ) 
+    res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err , c_funcs = c_funcs,  G_obs=G_obs, G_err=G_err, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min,skip_acceleration=skip_acceleration ) 
     
     # potentially blended, so rerun 
     if (period > 1e4) and (res[-2] < 25) & (res[-6]/res[-5] > 5): 
-        t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, 
+        t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err  = predict_astrometry_luminous_binary(ra = ra, dec = dec, parallax = parallax, pmra = pmra, pmdec = pmdec, 
                                                                                          m1 = m1, m2 = m2, period = period, Tp = Tp, ecc = ecc, 
                                                                                          omega = omega, inc = inc_deg*np.pi/180, w=w, 
                                                                                          phot_g_mean_mag = phot_g_mean_mag, f=f, data_release=data_release, 
@@ -1071,7 +1390,7 @@ def run_full_astrometric_cascade(ra, dec,
             if verbose:
                 print('not enough visibility periods!')
             return Nret*[0]
-        res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min, skip_acceleration=skip_acceleration) 
+        res = fit_full_astrometric_cascade(t_ast_yr = t_ast_yr, psi = psi, plx_factor = plx_factor, ast_obs = ast_obs, ast_err = ast_err, c_funcs = c_funcs,   G_obs=G_obs, G_err=G_err, verbose = verbose, show_residuals = show_residuals, ruwe_min=ruwe_min, skip_acceleration=skip_acceleration) 
 
     return res
     
@@ -1104,7 +1423,7 @@ def run_only_5par_solution(ra, dec,
     if c_funcs is None:
         c_funcs = read_in_C_functions()
 
-    t_ast_yr, psi, plx_factor, ast_obs, ast_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
+    t_ast_yr, psi, plx_factor, ast_obs, ast_err, G_obs, G_err = predict_astrometry_luminous_binary(ra = ra, dec = dec, 
                                                                                      parallax = parallax, pmra = pmra, pmdec = pmdec, 
                                                                                      m1 = m1, m2 = m2, period = period, 
                                                                                      Tp = Tp, ecc = ecc, omega = omega, 
@@ -1312,7 +1631,25 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     
     x, y = B_pred*X + G_pred*Y, A_pred*X + F_pred*Y   
     delta_eta = (-y*cpsi - x*spsi) 
-    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=m2/m1, f=f) for i in range(len(psi))])
+    #GI 05/01/2025: Now account for the effect of variability in the G-band
+    #the variability introduce a modulation of the flux ratio that affect the photocenter position
+    #this effect is indeed used to fit the so called "variability induced movers" (VIM) in Gaia DR3
+    #(see Halbwachs+23 paper, Section 6 https://ui.adsabs.harvard.edu/abs/2023A%26A...674A...9H/abstract)
+    # Considering that f=10**(G1-G2)/2.5, where G1 and G2 are the magnitudes of the two components (G1 is the brighter one),
+    # we can write the flux ratio including variability as:
+    # f_new = f * 10**(0.4*delta_G(t))
+    # where delta_G(t)=G(t) - <G> and G(t) is the instantaneous magnitude of the system at time t
+    # and <G> is the mean magnitude of the system (phot_g_mean_mag) used to estimate f 
+    G_magnitude_normalised  = variability_tool.g_lcurve_normalised(jds) 
+    f_variable = f * 10**(0.4*G_magnitude_normalised)
+
+    #Deal with possibile switch of primary (most luminous)/secondary due to variability
+    #If f_variable>1, we have to switch primary and secondary so that f'=1/f
+    #and q'=1/q=m1/m2.
+    f_variable_final = np.where(f_variable<1,f_variable,1/f_variable) #if f>1
+    q_variable_final = np.where(f_variable<1,m2/m1,m1/m2)
+
+    bias = np.array([al_bias_binary(delta_eta = delta_eta[i], q=q_variable_final[i], f=f_variable_final[i]) for i in range(len(psi))])
     Lambda_pred = pmra*t_ast_yr*spsi + pmdec*t_ast_yr*cpsi + parallax*plx_factor + bias
     
     #Chromatic shift
@@ -1329,51 +1666,6 @@ def predict_astrometry_and_rvs_simultaneously(t_ast_yr, psi, plx_factor, t_rvs_y
     
     return Lambda_pred, rv_pred
     
-def predict_astrometry_single_source(ra, dec, 
-                                     parallax, pmra, pmdec, 
-                                     phot_g_mean_mag, 
-                                     data_release, c_funcs=None, 
-                                     variability_tool: vt.VariabilityTool=vt.VariabilityTool(0.)):
-    '''
-    this function predicts the epoch-level astrometry for single source. 
-    ra and dec (degrees): the coordinates of the source at the reference time (which is different for dr3/dr4/dr5)
-    parallax (mas): the true parallax (i.e., 1/d)
-    pmra, pmdec: true proper motions in mas/yr
-    phot_g_mean_mag: G-band magnitude
-    f: flux ratio, F2/F1, in the G-band. 
-    c_funcs: from read_in_C_functions()
-    variability_tool: an instance of VariabilityTool to model color variability effects, default is no variability.
-    '''
-    
-    t = get_gost_one_position(ra, dec, data_release=data_release)
-    
-    # reject a random 10%
-    t = t[np.random.uniform(0, 1, len(t)) > 0.1]
-    psi, plx_factor, jds = fetch_table_element(['scanAngle[rad]', 'parallaxFactorAlongScan', 'ObservationTimeAtBarycentre[BarycentricJulianDateInTCB]'], t)
-    
-    t_ast_yr = rescale_times_astrometry(jd = jds, data_release = data_release)
-
-    N_ccd_avg = 8
-    epoch_err_per_transit = al_uncertainty_per_ccd_interp(G = phot_g_mean_mag)/np.sqrt(N_ccd_avg)
-    
-    if phot_g_mean_mag < 13:
-        extra_noise = np.random.uniform(0, 0.04)
-    else: 
-        extra_noise = 0
-    
-    Lambda_pred = pmra*t_ast_yr*np.sin(psi) + pmdec*t_ast_yr*np.cos(psi) + parallax*plx_factor 
-
-    #Add chromaticity effect due to color variability
-    colors = variability_tool(jds)
-    Lambda_chromatic = al_chromatic_shift(Gmean=phot_g_mean_mag, delta_bp_rp=colors, 
-                                          fchrom=variability_tool.fchrom, 
-                                          relative_norm=variability_tool.relative_norm)
-    Lambda_pred += Lambda_chromatic
-
-    Lambda_pred += epoch_err_per_transit*np.random.randn(len(psi)) # modeled noise
-    Lambda_pred += extra_noise*np.random.randn(len(psi)) # unmodeled noise
-
-    return t_ast_yr, psi, plx_factor, Lambda_pred, epoch_err_per_transit*np.ones(len(Lambda_pred))
 
  
 def photocenter_orbit_2d_from_thiele_innes(t_ast_yr, parallax, period, ecc, Tp, A, B, F, G,c_funcs):
@@ -1627,3 +1919,7 @@ def ln_flat_prior(theta, theta_bounds):
         return 0
     else: 
         return -np.inf
+
+
+if __name__ == '__main__':
+    print("ciao")

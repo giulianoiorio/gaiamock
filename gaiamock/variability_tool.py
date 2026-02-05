@@ -22,6 +22,7 @@ class VariabilityTool:
         self.fchrom=fchrom
         self.relative_norm=relative_norm
 
+
     def __call__(self, time):
         """
         Evaluate the variability model at given times.
@@ -32,6 +33,17 @@ class VariabilityTool:
         """
         return 0*time
 
+    def g_lcurve_normalised(self,time):
+        """
+        Evaluate the normalized G-band light curve at given times.
+        The normalized light curve is the G-band light curve minus its average magnitude.
+        Parameters:
+        time: array-like, times at which to evaluate the normalized G-band light curve.
+              The input time  is in Barycentric Julian Date (BJD) in Barycentric Coordinated Time (TCB) standard.
+        Returns: array-like, normalized G-band light curve values at the given times."""
+        return 0*time 
+    
+
 class SimpleSinusoidal(VariabilityTool):
     
     def __init__(self, amp, period,fchrom,relative_norm=True):
@@ -40,6 +52,9 @@ class SimpleSinusoidal(VariabilityTool):
         self.period = period
 
     def __call__(self, time):
+        return self.amp * np.sin(2 * np.pi * time / self.period)
+    
+    def g_lcurve_normalised(self,time):
         return self.amp * np.sin(2 * np.pi * time / self.period)
 
 ### For RR Lyrae
@@ -133,6 +148,8 @@ class RRLVariable(VariabilityTool):
         self.LCtemplate_rp = self.reconstruct_lc(gaiadf,band="rp")
         self.LCtemplate_g = self.reconstruct_lc(gaiadf,band="g")
 
+        #Initialise the average G, BP, RP as taken form the Gaia source
+        #These can be used to retrive the non-scaled light-curves
         self.average_g = self.LCtemplate_g.obs_average
         self.average_bp = self.LCtemplate_bp.obs_average
         self.average_rp = self.LCtemplate_rp.obs_average
@@ -148,6 +165,17 @@ class RRLVariable(VariabilityTool):
         Returns: array-like, color variability values at the given times which average to zero.
         """
         return (self.LCtemplate_bp.lc(time)  - self.LCtemplate_rp.lc(time))-self.average_color
+
+    def g_lcurve_normalised(self,time):
+        """
+        Evaluate the normalized G-band light curve at given times.
+        The normalized light curve is the G-band light curve minus its average magnitude.
+        Parameters:
+        time: array-like, times at which to evaluate the normalized G-band light curve.
+              The input time  is in Barycentric Julian Date (BJD) in Barycentric Coordinated Time (TCB) standard.
+        Returns: array-like, normalized G-band light curve values at the given times."""
+        return self.LCtemplate_g.lc(time) - self.average_g
+    
 
     def g_lcurve(self,time):
         """
